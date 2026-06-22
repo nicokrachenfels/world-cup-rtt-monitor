@@ -61,6 +61,8 @@ async def build_rows() -> list[dict]:
         else:
             match_label = f"{v['home_team']} vs {v['away_team']}"
 
+        fees_dollars = round(used - net, 2)  # total dollar impact of all fees
+
         rows.append({
             "match": match_label,
             "home": v["home_team"],
@@ -72,6 +74,8 @@ async def build_rows() -> list[dict]:
             "td_floor": td_floor,
             "used": round(used, 2),
             "net": round(net, 2),
+            "breakeven": round(net, 2),
+            "fees": fees_dollars,
             "profit": round(profit, 2),
             "margin": round(margin, 4),
             "dead": dead,
@@ -97,97 +101,347 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RTT Arbitrage Monitor</title>
 <style>
+  :root {{
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2d3148;
+    --text: #e8eaf6;
+    --text-dim: #8b91b8;
+    --text-muted: #555a7c;
+    --green: #22c55e;
+    --green-dim: #166534;
+    --green-bg: rgba(34,197,94,.08);
+    --red: #ef4444;
+    --red-dim: #7f1d1d;
+    --red-bg: rgba(239,68,68,.06);
+    --amber: #f59e0b;
+    --blue: #60a5fa;
+    --purple: #a78bfa;
+    --accent: #6366f1;
+    --accent2: #4f46e5;
+  }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f7; color: #1d1d1f; }}
-  header {{ background: #1d1d1f; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }}
-  header h1 {{ font-size: 18px; font-weight: 600; }}
-  header .updated {{ font-size: 12px; color: #aaa; }}
-  .controls {{ padding: 14px 24px; background: #fff; border-bottom: 1px solid #e0e0e0; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }}
-  .controls label {{ font-size: 13px; font-weight: 500; color: #555; }}
-  .controls select, .controls input[type=checkbox] {{ font-size: 13px; }}
-  select {{ padding: 5px 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }}
-  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
-  .badge-alert {{ background: #d4f0d4; color: #1a7f37; }}
-  .badge-dead {{ background: #fce8e8; color: #c62828; }}
-  .badge-tbd {{ background: #e8f0fe; color: #1a73e8; }}
-  .stats {{ padding: 10px 24px; background: #fff; border-bottom: 1px solid #e0e0e0; font-size: 13px; color: #555; display: flex; gap: 20px; }}
-  .stats b {{ color: #1d1d1f; }}
-  .table-wrap {{ overflow-x: auto; padding: 0 24px 32px; }}
-  table {{ width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08); }}
-  th {{ background: #f1f3f4; padding: 10px 12px; text-align: left; font-weight: 600; font-size: 12px; color: #555; cursor: pointer; white-space: nowrap; user-select: none; }}
-  th:hover {{ background: #e8eaed; }}
-  th.sorted-asc::after {{ content: " ▲"; }}
-  th.sorted-desc::after {{ content: " ▼"; }}
-  td {{ padding: 9px 12px; border-top: 1px solid #f0f0f0; white-space: nowrap; }}
-  tr:hover td {{ background: #fafafa; }}
-  tr.alert-row td {{ background: #f0faf2; }}
-  tr.dead-row td {{ background: #fff8f8; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }}
+
+  /* ── Header ── */
+  header {{
+    background: linear-gradient(135deg, #1e2035 0%, #13152a 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }}
+  header h1 {{ font-size: 15px; font-weight: 700; letter-spacing: .01em; display: flex; align-items: center; gap: 8px; }}
+  header h1 .icon {{ font-size: 18px; }}
+  header .meta {{ font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 16px; }}
+  header .meta .dot {{ width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }}
+  @keyframes pulse {{ 0%,100% {{ opacity: 1 }} 50% {{ opacity: .4 }} }}
+
+  /* ── Summary cards ── */
+  .summary {{
+    display: flex;
+    gap: 12px;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    overflow-x: auto;
+  }}
+  .card {{
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 18px;
+    min-width: 120px;
+    flex-shrink: 0;
+  }}
+  .card .label {{ font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin-bottom: 4px; }}
+  .card .value {{ font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }}
+  .card.green .value {{ color: var(--green); }}
+  .card.amber .value {{ color: var(--amber); }}
+  .card.blue .value {{ color: var(--blue); }}
+  .card.purple .value {{ color: var(--purple); }}
+
+  /* ── Controls ── */
+  .controls {{
+    padding: 12px 28px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }}
+  .filter-group {{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 5px 10px;
+  }}
+  .filter-group label {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); white-space: nowrap; }}
+  select {{
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    padding: 0 2px;
+  }}
+  select option {{ background: #22263a; }}
+  .toggle {{
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-dim);
+    transition: border-color .15s, background .15s;
+    user-select: none;
+  }}
+  .toggle:has(input:checked) {{
+    border-color: var(--accent);
+    background: rgba(99,102,241,.12);
+    color: var(--text);
+  }}
+  .toggle input {{ display: none; }}
+  .toggle .pip {{
+    width: 28px; height: 16px;
+    background: var(--border);
+    border-radius: 8px;
+    position: relative;
+    transition: background .15s;
+  }}
+  .toggle:has(input:checked) .pip {{ background: var(--accent); }}
+  .toggle .pip::after {{
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform .15s;
+  }}
+  .toggle:has(input:checked) .pip::after {{ transform: translateX(12px); }}
+
+  /* ── Table ── */
+  .table-wrap {{ overflow-x: auto; padding: 20px 28px 40px; }}
+  table {{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    background: var(--surface);
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }}
+  thead {{ position: sticky; top: 56px; z-index: 10; }}
+  th {{
+    background: var(--surface2);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+  }}
+  th:hover {{ color: var(--text); }}
+  th.num {{ text-align: right; }}
+  th.sorted-asc::after {{ content: " ↑"; color: var(--accent); }}
+  th.sorted-desc::after {{ content: " ↓"; color: var(--accent); }}
+  td {{
+    padding: 9px 14px;
+    border-bottom: 1px solid rgba(45,49,72,.6);
+    white-space: nowrap;
+    transition: background .1s;
+  }}
+  tr:last-child td {{ border-bottom: none; }}
+  tr:hover td {{ background: rgba(99,102,241,.04); }}
+  tr.alert-row td {{ background: var(--green-bg); }}
+  tr.alert-row:hover td {{ background: rgba(34,197,94,.12); }}
+  tr.dead-row td {{ background: var(--red-bg); }}
   .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
-  .profit-pos {{ color: #1a7f37; font-weight: 600; }}
-  .profit-neg {{ color: #c62828; }}
-  .margin-high {{ color: #1a7f37; font-weight: 700; }}
-  .margin-mid {{ color: #e67700; font-weight: 600; }}
-  .margin-low {{ color: #c62828; }}
-  .sep {{ color: #ccc; }}
-  #no-results {{ display: none; padding: 40px; text-align: center; color: #888; font-size: 14px; background: #fff; border-radius: 8px; margin-top: 16px; }}
+  td.match-cell {{ font-weight: 500; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }}
+  td.match-cell .date-sub {{ font-size: 10.5px; color: var(--text-muted); margin-top: 1px; }}
+
+  /* ── Number colors ── */
+  .profit-pos {{ color: var(--green); font-weight: 700; }}
+  .profit-neg {{ color: var(--red); }}
+  .margin-pos {{ color: var(--green); font-weight: 700; }}
+  .margin-neg {{ color: var(--red); }}
+  .dim {{ color: var(--text-dim); }}
+  .very-dim {{ color: var(--text-muted); }}
+
+  /* ── Cat pill ── */
+  .cat-pill {{
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .04em;
+  }}
+  .cat-1 {{ background: rgba(167,139,250,.15); color: var(--purple); }}
+  .cat-2 {{ background: rgba(96,165,250,.12); color: var(--blue); }}
+  .cat-3 {{ background: rgba(100,116,139,.15); color: #94a3b8; }}
+
+  /* ── Badges ── */
+  .badge {{ display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 10px; font-weight: 700; letter-spacing: .04em; }}
+  .badge-alert {{ background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.25); }}
+  .badge-dead {{ background: rgba(239,68,68,.12); color: var(--red); border: 1px solid rgba(239,68,68,.2); }}
+  .badge-tbd {{ background: rgba(96,165,250,.12); color: var(--blue); border: 1px solid rgba(96,165,250,.2); }}
+
+  /* ── No results ── */
+  #no-results {{
+    display: none;
+    padding: 60px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    background: var(--surface);
+    border-radius: 10px;
+    margin-top: 0;
+    border: 1px solid var(--border);
+  }}
+  #no-results .icon {{ font-size: 32px; margin-bottom: 8px; }}
+
+  /* ── Formula note ── */
+  .formula-note {{
+    margin: 0 28px 24px;
+    padding: 10px 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }}
+  .formula-note span {{ white-space: nowrap; }}
+  .formula-note b {{ color: var(--text-dim); }}
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar {{ width: 6px; height: 6px; }}
+  ::-webkit-scrollbar-track {{ background: transparent; }}
+  ::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 3px; }}
 </style>
 </head>
 <body>
 <header>
-  <h1>⚽ RTT Arbitrage Monitor</h1>
-  <span class="updated">Updated: {updated_at}</span>
+  <h1><span class="icon">⚽</span> RTT Arbitrage Monitor</h1>
+  <div class="meta">
+    <div class="dot"></div>
+    <span>Updated {updated_at}</span>
+  </div>
 </header>
+
+<div class="summary" id="summaryCards">
+  <div class="card green"><div class="label">Alerts</div><div class="value" id="cAlerts">—</div></div>
+  <div class="card amber"><div class="label">Profit+</div><div class="value" id="cProfit">—</div></div>
+  <div class="card blue"><div class="label">Showing</div><div class="value" id="cRows">—</div></div>
+  <div class="card purple"><div class="label">Best margin</div><div class="value" id="cBest">—</div></div>
+</div>
+
 <div class="controls">
-  <label>Category:
+  <div class="filter-group">
+    <label>Cat</label>
     <select id="filterCat">
       <option value="">All</option>
       <option value="1">Cat 1</option>
       <option value="2">Cat 2</option>
       <option value="3">Cat 3</option>
     </select>
-  </label>
-  <label>Date:
+  </div>
+  <div class="filter-group">
+    <label>Date</label>
     <select id="filterDate">
-      <option value="">All dates</option>
+      <option value="">All</option>
       {date_options}
     </select>
-  </label>
-  <label>Teams:
+  </div>
+  <div class="filter-group">
+    <label>Teams</label>
     <select id="filterTeams">
       <option value="">All</option>
-      <option value="confirmed">Confirmed only</option>
-      <option value="tbd">TBD only</option>
+      <option value="confirmed">Confirmed</option>
+      <option value="tbd">TBD</option>
     </select>
+  </div>
+  <label class="toggle">
+    <input type="checkbox" id="filterAlerts">
+    <div class="pip"></div>
+    Alerts only (≥{int(MARGIN_THRESHOLD*100)}% or +${DOLLAR_THRESHOLD})
   </label>
-  <label><input type="checkbox" id="filterAlerts"> Alerts only (≥{int(MARGIN_THRESHOLD*100)}% or +${DOLLAR_THRESHOLD})</label>
-  <label><input type="checkbox" id="filterHideDead"> Hide deadwood</label>
+  <label class="toggle">
+    <input type="checkbox" id="filterHideDead">
+    <div class="pip"></div>
+    Hide deadwood
+  </label>
 </div>
-<div class="stats" id="statsBar">Loading...</div>
+
 <div class="table-wrap">
   <table id="mainTable">
     <thead>
       <tr>
         <th data-col="match">Match</th>
         <th data-col="cat">Cat</th>
-        <th data-col="date">Date</th>
-        <th data-col="rtt" class="num sorted-desc">RTT $</th>
-        <th data-col="td_floor" class="num">TD Floor</th>
-        <th data-col="used" class="num">Used</th>
+        <th data-col="rtt" class="num">RTT price</th>
+        <th data-col="breakeven" class="num">Breakeven</th>
         <th data-col="profit" class="num">Profit $</th>
         <th data-col="margin" class="num">Margin</th>
+        <th data-col="used" class="num">Cat-adj. get-in</th>
+        <th data-col="fees" class="num">Fees $</th>
+        <th data-col="td_floor" class="num">Floor price</th>
         <th>Flags</th>
       </tr>
     </thead>
     <tbody id="tableBody"></tbody>
   </table>
-  <div id="no-results">No matches found for selected filters.</div>
+  <div id="no-results">
+    <div class="icon">🔍</div>
+    No matches found for selected filters.
+  </div>
 </div>
+
+<div class="formula-note">
+  <span><b>Formula:</b> seller_net = get_in ÷ 1.20 × 0.90 &nbsp;·&nbsp; profit = seller_net − RTT price</span>
+  <span><b>Cat multipliers:</b> Cat1 × 1.20, Cat2 × 1.00, Cat3 × 0.80</span>
+  <span><b>Alert:</b> margin ≥ {int(MARGIN_THRESHOLD*100)}% OR profit ≥ ${DOLLAR_THRESHOLD}</span>
+</div>
+
 <script>
 const RAW = {data_json};
 let sortCol = "margin", sortDir = -1;
 
 function fmt(n) {{
   return new Intl.NumberFormat("en-US", {{maximumFractionDigits: 0}}).format(n);
+}}
+
+function fmtDate(d) {{
+  if (!d || d === "Unknown") return d;
+  // "2026-07-04" → "Jul 4"
+  const [, m, day] = d.split("-");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${{months[parseInt(m)-1]}} ${{parseInt(day)}}`;
 }}
 
 function renderTable() {{
@@ -215,11 +469,11 @@ function renderTable() {{
 
   const alerts = rows.filter(r => r.alert).length;
   const positive = rows.filter(r => r.profit > 0).length;
-  document.getElementById("statsBar").innerHTML =
-    `<span>Showing <b>${{rows.length}}</b> rows</span>` +
-    `<span class="sep">|</span><span><b>${{alerts}}</b> alerts</span>` +
-    `<span class="sep">|</span><span><b>${{positive}}</b> profit+ matches</span>` +
-    `<span class="sep">|</span><span>Formula: get_in × 0.75 (÷1.20 buyer fee, ×0.90 seller fee) &nbsp;·&nbsp; Cat1 used = floor × ${{(1.20).toFixed(2)}}x</span>`;
+  const best = rows.filter(r => r.margin > 0)[0];
+  document.getElementById("cAlerts").textContent = alerts;
+  document.getElementById("cProfit").textContent = positive;
+  document.getElementById("cRows").textContent = rows.length;
+  document.getElementById("cBest").textContent = best ? (best.margin*100).toFixed(1)+"%" : "—";
 
   const tbody = document.getElementById("tableBody");
   tbody.innerHTML = "";
@@ -234,31 +488,37 @@ function renderTable() {{
 
   rows.forEach(r => {{
     const pct = (r.margin * 100).toFixed(1) + "%";
-    const pctClass = r.margin >= 0.10 ? "margin-high" : r.margin >= 0.05 ? "margin-mid" : "margin-low";
+    const pctClass = r.margin > 0 ? "margin-pos" : "margin-neg";
     const profitClass = r.profit >= 0 ? "profit-pos" : "profit-neg";
-    const profitStr = (r.profit >= 0 ? "+$" : "-$") + fmt(Math.abs(r.profit));
+    const profitStr = (r.profit >= 0 ? "+$" : "−$") + fmt(Math.abs(r.profit));
     const rowClass = r.alert ? "alert-row" : r.dead ? "dead-row" : "";
+    const catClass = `cat-${{r.cat}}`;
 
     const flags = [];
-    if (r.alert) flags.push('<span class="badge badge-alert">◄ ALERT</span>');
+    if (r.alert) flags.push('<span class="badge badge-alert">ALERT</span>');
     if (r.dead) flags.push('<span class="badge badge-dead">DEAD</span>');
     if (r.tbd) flags.push('<span class="badge badge-tbd">TBD</span>');
 
+    const dateFmt = fmtDate(r.date);
+
     tbody.innerHTML += `<tr class="${{rowClass}}">
-      <td>${{r.match}}</td>
-      <td>Cat ${{r.cat}}</td>
-      <td>${{r.date}}</td>
-      <td class="num">$${{fmt(r.rtt)}}</td>
-      <td class="num">$${{fmt(r.td_floor)}}</td>
-      <td class="num">$${{fmt(r.used)}}</td>
+      <td class="match-cell">
+        <div>${{r.match}}</div>
+        <div class="date-sub">${{dateFmt}}</div>
+      </td>
+      <td><span class="cat-pill ${{catClass}}">Cat ${{r.cat}}</span></td>
+      <td class="num dim">$${{fmt(r.rtt)}}</td>
+      <td class="num dim">$${{fmt(r.breakeven)}}</td>
       <td class="num ${{profitClass}}">${{profitStr}}</td>
       <td class="num ${{pctClass}}">${{pct}}</td>
+      <td class="num dim">$${{fmt(r.used)}}</td>
+      <td class="num very-dim">$${{fmt(r.fees)}}</td>
+      <td class="num very-dim">$${{fmt(r.td_floor)}}</td>
       <td>${{flags.join(" ")}}</td>
     </tr>`;
   }});
 }}
 
-// Sortable columns
 document.querySelectorAll("th[data-col]").forEach(th => {{
   th.addEventListener("click", () => {{
     const col = th.dataset.col;
@@ -270,13 +530,11 @@ document.querySelectorAll("th[data-col]").forEach(th => {{
   }});
 }});
 
-// Filter listeners
 ["filterCat","filterDate","filterTeams"].forEach(id =>
   document.getElementById(id).addEventListener("change", renderTable));
 ["filterAlerts","filterHideDead"].forEach(id =>
   document.getElementById(id).addEventListener("change", renderTable));
 
-// Initial sort state
 document.querySelector('th[data-col="margin"]').classList.add("sorted-desc");
 renderTable();
 </script>
