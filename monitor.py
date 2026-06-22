@@ -107,9 +107,9 @@ async def run(dry_run: bool = False, force_alert: bool = False) -> None:
 
     logger.info(f"Active listings after team filter: {len(filtered_mins)}")
 
-    # ── 4. Scrape all TicketData match prices at once ─────────────────────
+    # ── 4. Scrape all TicketData match prices at once (sync, uses cloudscraper)
     logger.info("Scraping TicketData World Cup matches page...")
-    td_matches = await scrape_all_matches()
+    td_matches = scrape_all_matches()
     logger.info(f"TicketData returned {len(td_matches)} matches")
 
     # ── 6. Evaluate profitability ─────────────────────────────────────────

@@ -187,18 +187,17 @@ def _parse_raw_listing(raw: dict) -> Optional[RTTListing]:
     elif "£" in text:
         currency = "GBP"
 
-    # Extract category
-    cat_match = re.search(r"[Cc]ategor(?:y|ia)[:\s]*([123])", text)
-    category = cat_match.group(1) if cat_match else "Unknown"
+    # Extract category — FIFA page uses "CAT 1", "CAT 2", "CAT 3" or "Category 1" etc.
+    cat_match = re.search(r"\bCAT\s*([123])\b|\b[Cc]ategor(?:y|ia)[:\s]*([123])\b", text)
+    if cat_match:
+        category = cat_match.group(1) or cat_match.group(2)
+    else:
+        category = "Unknown"
 
     # Try to extract team names — look for "vs" or "v." patterns
     vs_match = re.search(r"([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)\s+(?:vs?\.?|–|-)\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)", text)
     home_team = vs_match.group(1) if vs_match else "TBD"
     away_team = vs_match.group(2) if vs_match else "TBD"
-
-    # Venue — look for city names after known patterns
-    venue_match = re.search(r"(?:at|@|venue|stadium)[:\s]+([A-Z][^\n,]+)", text, re.IGNORECASE)
-    venue = venue_match.group(1).strip() if venue_match else "Unknown"
 
     # Date — look for date-like strings
     date_match = re.search(
@@ -207,6 +206,21 @@ def _parse_raw_listing(raw: dict) -> Optional[RTTListing]:
         re.IGNORECASE,
     )
     match_date = date_match.group(0) if date_match else "Unknown"
+
+    # Venue — any non-price, non-date, non-team line that looks like a place name
+    venue_match = re.search(r"(?:at|@|venue|stadium)[:\s]+([A-Z][^\n,]+)", text, re.IGNORECASE)
+    if venue_match:
+        venue = venue_match.group(1).strip()
+    else:
+        # Fallback: grab lines that look like city/stadium names (title-cased, no $)
+        venue_lines = [
+            l.strip() for l in text.splitlines()
+            if l.strip() and "$" not in l and "CAT" not in l.upper()
+            and not re.search(r"\d{1,2}[/\-]\d{1,2}", l)
+            and 4 < len(l.strip()) < 50
+            and l.strip()[0].isupper()
+        ]
+        venue = venue_lines[0] if venue_lines else "Unknown"
 
     match_key = f"{home_team} vs {away_team} - {venue} - {match_date}"
 
