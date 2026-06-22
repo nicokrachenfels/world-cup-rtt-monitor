@@ -314,14 +314,12 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 
   /* ── Table ── */
   .table-wrap {{ overflow-x: auto; padding: 20px 28px 40px; }}
+  .table-inner {{ border: 1px solid var(--border); border-radius: 8px; overflow: clip; }}
   table {{
     width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
+    border-collapse: collapse;
     font-size: 12.5px;
     background: var(--surface);
-    box-shadow: 0 0 0 1px var(--border);
-    border-radius: 10px;
   }}
   thead {{ position: sticky; top: 56px; z-index: 20; background: var(--surface2); }}
   th {{
@@ -332,23 +330,19 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: .07em;
-    color: var(--text-muted);
+    color: var(--text-dim);
     cursor: pointer;
     white-space: nowrap;
     user-select: none;
     border-bottom: 1px solid var(--border);
   }}
-  thead th:first-child {{ border-top-left-radius: 10px; }}
-  thead th:last-child {{ border-top-right-radius: 10px; }}
-  tr:last-child td:first-child {{ border-bottom-left-radius: 10px; }}
-  tr:last-child td:last-child {{ border-bottom-right-radius: 10px; }}
   th:hover {{ color: var(--text); }}
   th.num {{ text-align: right; }}
   th.sorted-asc::after {{ content: " ↑"; color: var(--accent); }}
   th.sorted-desc::after {{ content: " ↓"; color: var(--accent); }}
   td {{
     padding: 9px 14px;
-    border-bottom: 1px solid var(--row-border);
+    border-bottom: 1px solid var(--border);
     white-space: nowrap;
     transition: background .1s;
   }}
@@ -359,7 +353,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   tr.dead-row td {{ background: var(--red-bg); }}
   .num {{ text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }}
   td.match-cell {{ font-weight: 500; min-width: 220px; white-space: normal; }}
-  td.match-cell .date-sub {{ font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }}
+  td.match-cell .date-sub {{ font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }}
 
   /* ── Number colors ── */
   .profit-pos {{ color: var(--green); font-weight: 700; }}
@@ -478,6 +472,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 </div>
 
 <div class="table-wrap">
+  <div class="table-inner">
   <table id="mainTable">
     <thead>
       <tr>
@@ -495,6 +490,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     </thead>
     <tbody id="tableBody"></tbody>
   </table>
+  </div>
   <div id="no-results">
     <div class="icon">🔍</div>
     No matches found for selected filters.
