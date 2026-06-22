@@ -1,0 +1,6 @@
+{
+  "profit_threshold": 0.10,
+  "seller_fee": 0.10,
+  "buyer_fee_markup": 0.20,
+  "alert_email": "your_email@gmail.com"
+}
