@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import re
+
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
 from scraper.ticketdata import scrape_all_matches, find_get_in_price
 from scraper.standings import fetch_standings, is_deadwood_match
@@ -56,6 +58,78 @@ def compute_profit(rtt_price: float, get_in_price: float, cfg: dict) -> tuple[fl
     seller_net = get_in_price / (1 + cfg["buyer_fee_markup"]) * (1 - cfg["seller_fee"])
     margin = (seller_net - rtt_price) / rtt_price
     return seller_net, margin
+
+
+def _round_name(match_code: str) -> str:
+    try:
+        n = int(match_code[1:])
+    except (ValueError, IndexError):
+        return ""
+    if n <= 72:  return ""
+    if n <= 88:  return "Round of 32"
+    if n <= 96:  return "Round of 16"
+    if n <= 100: return "Quarter-final"
+    if n <= 102: return "Semi-final"
+    if n == 103: return "3rd Place"
+    if n == 104: return "Final"
+    return "Knockout"
+
+
+def _build_match_label(listing: dict, td_matches: dict) -> str:
+    """
+    Build a human-readable match label for use in email alerts.
+    Falls back gracefully from full team names → round+code → generic.
+    """
+    home = listing.get("home_team", "TBD")
+    away = listing.get("away_team", "TBD")
+    venue = listing.get("venue", "")
+    date = listing.get("match_date", "")
+
+    if home != "TBD" and away != "TBD":
+        return f"{home} vs {away}"
+
+    # TBD match — try to resolve via match code
+    if re.match(r'^M\d+$', venue or ""):
+        td_m = next((m for m in td_matches.values() if m.get("match_code") == venue), None)
+        if td_m:
+            td_home = td_m.get("home_team", "TBD")
+            td_away = td_m.get("away_team", "TBD")
+            round_label = _round_name(venue)
+            if td_home != "TBD" and td_away != "TBD":
+                suffix = f" ({td_home} vs {td_away})" if round_label else f"{td_home} vs {td_away}"
+                return f"{round_label}{suffix}" if round_label else suffix
+        round_label = _round_name(venue)
+        return f"{round_label} ({venue})" if round_label else venue
+
+    # Try city + date lookup in td_matches
+    if venue and venue != "Unknown" and date and date != "Unknown":
+        try:
+            from scraper.ticketdata import _normalize_city, _parse_rtt_date, _parse_td_date
+            city_norm = _normalize_city(venue)
+            rtt_month, rtt_day = _parse_rtt_date(date)
+            if rtt_month > 0:
+                for td_m in td_matches.values():
+                    td_city = _normalize_city(td_m.get("city", ""))
+                    td_month, td_day = _parse_td_date(td_m.get("match_date", ""))
+                    if td_city == city_norm and td_month == rtt_month and td_day == rtt_day:
+                        mc = td_m.get("match_code", "")
+                        round_label = _round_name(mc) if mc else ""
+                        td_home = td_m.get("home_team", "TBD")
+                        td_away = td_m.get("away_team", "TBD")
+                        if td_home != "TBD" and td_away != "TBD":
+                            return f"{round_label} ({td_home} vs {td_away})" if round_label else f"{td_home} vs {td_away}"
+                        elif mc:
+                            return f"{round_label} ({mc})" if round_label else mc
+        except Exception:
+            pass
+
+    # Last resort: use whatever venue info we have
+    if venue and venue != "Unknown":
+        round_label = _round_name(venue) if re.match(r'^M\d+$', venue) else ""
+        return f"{round_label} ({venue})" if round_label else f"Match at {venue}"
+    if date and date != "Unknown":
+        return f"Knockout Match ({date})"
+    return listing.get("match_key", "Knockout Match")
 
 
 def _get_env(key: str, required: bool = True) -> Optional[str]:
@@ -132,7 +206,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     removed_keys = prev_keys - current_rtt_keys
     removed_listings = [
         {
-            "match_key": state[k]["match_key"],
+            "match_key": state[k].get("match_label", state[k]["match_key"]),
             "category": state[k].get("category", "?"),
             "last_price": state[k]["min_price"],
         }
@@ -162,7 +236,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             logger.debug(f"No get-in price for {listing['match_key']} — skipping profit calc")
             if is_brand_new:
                 new_listings.append({
-                    "match_key": listing["match_key"],
+                    "match_key": _build_match_label(listing, td_matches),
                     "category": listing["category"],
                     "rtt_price": rtt_price,
                     "get_in_price": None,
@@ -175,7 +249,8 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         deadwood = is_deadwood_match(listing["home_team"], listing["away_team"], statuses)
 
         result = {
-            "match_key": listing["match_key"],
+            "match_key": _build_match_label(listing, td_matches),
+            "_raw_match_key": listing["match_key"],
             "home_team": listing["home_team"],
             "away_team": listing["away_team"],
             "venue": listing["venue"],
@@ -199,7 +274,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             if is_new_low or force_alert:
                 triggered.append(result)
                 logger.info(
-                    f"ALERT: {listing['match_key']} Cat {listing['category']} | "
+                    f"ALERT: {result['match_key']} Cat {listing['category']} | "
                     f"RTT ${rtt_price:,.0f} | Get-in ${get_in:,.0f} | "
                     f"Margin {margin:.1%} (new low: ${prev_min:,.0f} → ${rtt_price:,.0f})"
                 )
@@ -210,7 +285,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         elif is_brand_new:
             # New listing that isn't profitable yet — track supply movement
             new_listings.append({
-                "match_key": listing["match_key"],
+                "match_key": _build_match_label(listing, td_matches),
                 "category": listing["category"],
                 "rtt_price": rtt_price,
                 "get_in_price": get_in,
@@ -221,14 +296,16 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 f"RTT ${rtt_price:,.0f} | Margin {margin:.1%}"
             )
 
-        # Update state regardless
+        # Update state — raw match_key for stability, match_label for display
         state[composite_key] = {
             "min_price": rtt_price,
             "get_in_price": get_in,
             "margin": margin,
             "match_key": listing["match_key"],
+            "match_label": _build_match_label(listing, td_matches),
             "category": listing["category"],
         }
+
 
     # ── 8. Log summary ────────────────────────────────────────────────────
     logger.info(

@@ -15,6 +15,7 @@ sys.path.insert(0, ".")
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
 from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams, find_td_match
 from scraper.standings import fetch_standings, is_deadwood_match, get_group_rankings
+from scraper.bbc_bracket import scrape_bbc_bracket, _norm as _bbc_norm
 
 import re as _re
 from typing import Optional
@@ -71,12 +72,88 @@ def _round_name(match_code: str) -> str:
     return "Knockout"
 
 
+def apply_bbc_projections(
+    td_matches: dict,
+    bbc_pairs: list[dict],
+    rankings: dict,
+) -> dict:
+    """
+    Return {match_code: (home_team, away_team)} for R32 matches (M73-M88)
+    using BBC 'as it stands' bracket as the source of wildcard team names.
+    """
+    if not bbc_pairs:
+        return {}
+
+    # Build lookup: norm(team_name) → pair
+    bbc_by_team: dict[str, dict] = {}
+    for pair in bbc_pairs:
+        bbc_by_team[_bbc_norm(pair["home"])] = pair
+        bbc_by_team[_bbc_norm(pair["away"])] = pair
+
+    # Build lookup: date → [pair] for both-TBD date matching
+    bbc_by_date: dict[str, list] = {}
+    for pair in bbc_pairs:
+        d = pair.get("date", "")
+        if d:
+            bbc_by_date.setdefault(d, []).append(pair)
+
+    _MONTHS = ["","JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"]
+
+    result = {}
+    for td_m in td_matches.values():
+        mc = td_m.get("match_code", "")
+        if not mc:
+            continue
+        try:
+            n = int(mc[1:])
+        except (ValueError, IndexError):
+            continue
+        if n < 73 or n > 88:
+            continue
+
+        h_raw = td_m.get("home_team", "TBD").strip("() ")
+        a_raw = td_m.get("away_team", "TBD").strip("() ")
+        if _re.match(r'^World Cup Match\b', h_raw, _re.I): h_raw = "TBD"
+        if _re.match(r'^World Cup Match\b', a_raw, _re.I): a_raw = "TBD"
+
+        h_res = _resolve_group_code(h_raw, rankings) or (None if h_raw == "TBD" else h_raw)
+        a_res = _resolve_group_code(a_raw, rankings) or (None if a_raw == "TBD" else a_raw)
+
+        bbc_pair = None
+        if h_res and _bbc_norm(h_res) in bbc_by_team:
+            bbc_pair = bbc_by_team[_bbc_norm(h_res)]
+        elif a_res and _bbc_norm(a_res) in bbc_by_team:
+            bbc_pair = bbc_by_team[_bbc_norm(a_res)]
+
+        if bbc_pair is None:
+            # Fall back to date matching
+            raw_date = td_m.get("match_date", "")
+            try:
+                parts = raw_date.split("-")
+                month_num = int(parts[1])
+                day = int(parts[2])
+                date_key = f"{_MONTHS[month_num]} {day}"
+                candidates = bbc_by_date.get(date_key, [])
+                if len(candidates) == 1:
+                    bbc_pair = candidates[0]
+            except (ValueError, IndexError):
+                pass
+
+        if bbc_pair:
+            result[mc] = (bbc_pair["home"], bbc_pair["away"])
+
+    return result
+
+
 async def build_rows() -> list[dict]:
     listings = await scrape_fifa_rtt()
     mins = get_min_prices_by_match(listings)
     td = scrape_all_matches()
     statuses = fetch_standings()
     rankings = get_group_rankings(statuses)
+
+    bbc_pairs = await scrape_bbc_bracket()
+    bbc_proj = apply_bbc_projections(td, bbc_pairs, rankings)
 
     rows = []
     for v in mins.values():
@@ -112,40 +189,46 @@ async def build_rows() -> list[dict]:
                 location = f"{_v}, {_c}" if (_v and _c) else (_v or _c)
             else:
                 location = ""
-            td_teams = find_td_teams(venue_code, td) if venue_code else None
-            if td_teams:
-                h, a = td_teams
-                h_proj = _resolve_group_code(h, rankings)
-                a_proj = _resolve_group_code(a, rankings)
-                if h_proj and a_proj:
-                    teams_str = f"{h_proj} vs {a_proj}"
-                    proj_suffix = " (projected)"
-                else:
-                    # Strip any outer parens TicketData puts on winner refs like "(W85)"
-                    teams_str = f"{h.strip('() ')} vs {a.strip('() ')}"
-                    proj_suffix = ""
-                match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
+
+            # 1. BBC bracket projection (covers wildcard 3rd-place slots)
+            bbc_teams = bbc_proj.get(venue_code)
+            if bbc_teams:
+                h_bbc, a_bbc = bbc_teams
+                teams_str = f"{h_bbc} vs {a_bbc}"
+                match_label = f"{round_label} ({teams_str}) (projected)" if round_label else teams_str
             else:
-                # find_td_teams returned None — one or both teams are "TBD" in TicketData.
-                # _td_m is already fetched; try partial projection from whatever team info it has.
-                if _td_m:
-                    h_raw = _td_m.get("home_team", "TBD").strip("() ")
-                    a_raw = _td_m.get("away_team", "TBD").strip("() ")
-                    # Treat TicketData placeholder titles as TBD
-                    if _re.match(r'^World Cup Match\b', h_raw, _re.I): h_raw = "TBD"
-                    if _re.match(r'^World Cup Match\b', a_raw, _re.I): a_raw = "TBD"
-                    if h_raw != "TBD" or a_raw != "TBD":
-                        h_proj = _resolve_group_code(h_raw, rankings) if h_raw != "TBD" else None
-                        a_proj = _resolve_group_code(a_raw, rankings) if a_raw != "TBD" else None
-                        h_str = h_proj or h_raw
-                        a_str = a_proj or a_raw
-                        proj_suffix = " (projected)" if (h_proj or a_proj) else ""
-                        teams_str = f"{h_str} vs {a_str}"
-                        match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
+                # 2. TicketData known teams (both sides resolved)
+                td_teams = find_td_teams(venue_code, td) if venue_code else None
+                if td_teams:
+                    h, a = td_teams
+                    h_proj = _resolve_group_code(h, rankings)
+                    a_proj = _resolve_group_code(a, rankings)
+                    if h_proj and a_proj:
+                        teams_str = f"{h_proj} vs {a_proj}"
+                        proj_suffix = " (projected)"
+                    else:
+                        teams_str = f"{h.strip('() ')} vs {a.strip('() ')}"
+                        proj_suffix = ""
+                    match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
+                else:
+                    # 3. Partial resolution from TicketData when one side is known
+                    if _td_m:
+                        h_raw = _td_m.get("home_team", "TBD").strip("() ")
+                        a_raw = _td_m.get("away_team", "TBD").strip("() ")
+                        if _re.match(r'^World Cup Match\b', h_raw, _re.I): h_raw = "TBD"
+                        if _re.match(r'^World Cup Match\b', a_raw, _re.I): a_raw = "TBD"
+                        if h_raw != "TBD" or a_raw != "TBD":
+                            h_proj = _resolve_group_code(h_raw, rankings) if h_raw != "TBD" else None
+                            a_proj = _resolve_group_code(a_raw, rankings) if a_raw != "TBD" else None
+                            h_str = h_proj or h_raw
+                            a_str = a_proj or a_raw
+                            proj_suffix = " (projected)" if (h_proj or a_proj) else ""
+                            teams_str = f"{h_str} vs {a_str}"
+                            match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
+                        else:
+                            match_label = f"{round_label} ({venue_code})" if (round_label and venue_code) else (round_label or venue_code or "TBD")
                     else:
                         match_label = f"{round_label} ({venue_code})" if (round_label and venue_code) else (round_label or venue_code or "TBD")
-                else:
-                    match_label = f"{round_label} ({venue_code})" if (round_label and venue_code) else (round_label or venue_code or "TBD")
             subtitle = f"{date_part} · {location}" if location else date_part
         else:
             match_label = f"{v['home_team']} vs {v['away_team']}"
