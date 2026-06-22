@@ -160,6 +160,28 @@ def _apply_status_flags(group_teams: list[TeamStatus]) -> None:
                     team["clinched_first"] = True
 
 
+def is_deadwood_match(
+    home_team: str,
+    away_team: str,
+    statuses: dict[str, TeamStatus],
+) -> bool:
+    """
+    Returns True when NEITHER team has anything to play for.
+    A team is 'dead' if it is eliminated OR has already clinched 1st place.
+    TBD teams are never considered dead.
+    """
+    if home_team == "TBD" or away_team == "TBD":
+        return False
+
+    def _is_dead(team_name: str) -> bool:
+        s = statuses.get(team_name.lower())
+        if not s:
+            return False
+        return s["eliminated"] or s["clinched_first"]
+
+    return _is_dead(home_team) and _is_dead(away_team)
+
+
 def is_match_worth_monitoring(
     home_team: str,
     away_team: str,

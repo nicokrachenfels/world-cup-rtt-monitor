@@ -17,7 +17,7 @@ from typing import Optional
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
 from scraper.ticketdata import scrape_all_matches, find_get_in_price
-from scraper.standings import fetch_standings, is_match_worth_monitoring
+from scraper.standings import fetch_standings, is_deadwood_match
 from alerts.email import send_alert
 
 logging.basicConfig(
@@ -94,18 +94,9 @@ async def run(dry_run: bool = False, force_alert: bool = False) -> None:
     for k, v in rtt_mins.items():
         logger.info(f"  RTT: {v['match_key']} | Cat {v['category']} | ${v['min_price']:,.0f}")
 
-    # ── 3. Filter by team status ─────────────────────────────────────────
-    filtered_mins = {}
-    for composite_key, listing in rtt_mins.items():
-        should_monitor, reason = is_match_worth_monitoring(
-            listing["home_team"], listing["away_team"], statuses
-        )
-        if should_monitor:
-            filtered_mins[composite_key] = listing
-        else:
-            logger.info(f"Skipping {listing['match_key']}: {reason}")
-
-    logger.info(f"Active listings after team filter: {len(filtered_mins)}")
+    # ── 3. All listings included; deadwood flag is informational only ────
+    filtered_mins = rtt_mins
+    logger.info(f"Active listings: {len(filtered_mins)}")
 
     # ── 4. Scrape all TicketData match prices at once (sync, uses cloudscraper)
     logger.info("Scraping TicketData World Cup matches page...")
@@ -117,15 +108,22 @@ async def run(dry_run: bool = False, force_alert: bool = False) -> None:
     triggered: list[dict] = []
     all_profitable: list[dict] = []
 
+    dollar_threshold = cfg.get("profit_dollar_threshold", 300)
+
     for composite_key, listing in filtered_mins.items():
         rtt_price = listing["min_price"]
-        get_in = find_get_in_price(listing["home_team"], listing["away_team"], td_matches)
+        get_in = find_get_in_price(
+            listing["home_team"], listing["away_team"], td_matches,
+            venue=listing.get("venue"), date_str=listing.get("match_date"),
+        )
 
         if get_in is None:
             logger.debug(f"No get-in price for {listing['match_key']} — skipping profit calc")
             continue
 
         seller_net, margin = compute_profit(rtt_price, get_in, cfg)
+        profit_dollars = seller_net - rtt_price
+        deadwood = is_deadwood_match(listing["home_team"], listing["away_team"], statuses)
 
         result = {
             "match_key": listing["match_key"],
@@ -138,9 +136,11 @@ async def run(dry_run: bool = False, force_alert: bool = False) -> None:
             "get_in_price": get_in,
             "seller_net": seller_net,
             "profit_margin": margin,
+            "profit_dollars": profit_dollars,
+            "deadwood": deadwood,
         }
 
-        if margin >= threshold:
+        if margin >= threshold or profit_dollars >= dollar_threshold:
             all_profitable.append(result)
 
             # Check if this is a new price low for this match+category
@@ -181,13 +181,16 @@ async def run(dry_run: bool = False, force_alert: bool = False) -> None:
         from_email = _get_env("ALERT_FROM_EMAIL")
         to_email = cfg.get("alert_email") or _get_env("ALERT_EMAIL")
 
-        send_alert(
-            sendgrid_api_key=sendgrid_key,
-            from_email=from_email,
-            to_email=to_email,
-            triggered_listings=triggered,
-            all_profitable_listings=all_profitable,
-        )
+        try:
+            send_alert(
+                sendgrid_api_key=sendgrid_key,
+                from_email=from_email,
+                to_email=to_email,
+                triggered_listings=triggered,
+                all_profitable_listings=all_profitable,
+            )
+        except Exception as e:
+            logger.error(f"Email send failed (state still saved): {e}")
     else:
         logger.info("No alerts triggered this run")
 

@@ -37,8 +37,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: state.json
-          key: rtt-state-v1
-          restore-keys: rtt-state-v1
+          key: rtt-state-v1-${{ github.run_number }}
+          restore-keys: rtt-state-v1-
 
       - name: Run RTT monitor
         env:
@@ -54,4 +54,4 @@ jobs:
         if: always()  # Save state even if the monitor step fails
         with:
           path: state.json
-          key: rtt-state-v1
+          key: rtt-state-v1-${{ github.run_number }}
