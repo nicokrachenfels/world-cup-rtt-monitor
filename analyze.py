@@ -21,6 +21,17 @@ from typing import Optional
 
 _GROUP_CODE_RE = _re.compile(r'^(\d)([A-Z])$')
 
+_MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+_MON_MAP = {m.upper(): i for i, m in enumerate(_MONTH_ABBR)}
+
+
+def _fmt_date(date_str: str) -> str:
+    """Convert 'JUN 25' → 'Jun 25'. Pass through anything else."""
+    parts = date_str.split()
+    if len(parts) == 2 and parts[0].upper() in _MON_MAP:
+        return f"{_MONTH_ABBR[_MON_MAP[parts[0].upper()]]} {int(parts[1])}"
+    return date_str
+
 
 def _resolve_group_code(code: str, rankings: dict) -> Optional[str]:
     """'1H' → current 1st-place team in Group H, or None if unresolvable."""
@@ -90,28 +101,36 @@ async def build_rows() -> list[dict]:
         venue_code = v.get("venue", "")
         match_date = v.get("match_date", "Unknown")
 
+        date_part = _fmt_date(match_date)
+
         if tbd:
             round_label = _round_name(venue_code)
+            # Get stadium/city from TicketData for the location subtitle
+            location = next(
+                (m.get("venue") or m.get("city", "")
+                 for m in td.values() if m.get("match_code") == venue_code),
+                ""
+            )
             td_teams = find_td_teams(venue_code, td) if venue_code else None
             if td_teams:
                 h, a = td_teams
                 h_proj = _resolve_group_code(h, rankings)
                 a_proj = _resolve_group_code(a, rankings)
                 if h_proj and a_proj:
-                    # Group-position codes resolved to current leaders
-                    match_label = f"{h_proj} vs {a_proj}"
-                    sub_parts = ([round_label] if round_label else []) + [match_date, "projected"]
-                    subtitle = " · ".join(sub_parts)
+                    teams_str = f"{h_proj} vs {a_proj}"
+                    proj_suffix = " (projected)"
                 else:
-                    # Winner refs (W85) or already-confirmed teams — show as-is
-                    match_label = f"{h} vs {a}"
-                    subtitle = f"{round_label} · {match_date}" if round_label else match_date
+                    # Strip any outer parens TicketData puts on winner refs like "(W85)"
+                    teams_str = f"{h.strip('() ')} vs {a.strip('() ')}"
+                    proj_suffix = ""
+                match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
             else:
                 match_label = round_label or venue_code or "TBD"
-                subtitle = match_date
+            subtitle = f"{date_part} · {location}" if location else date_part
         else:
             match_label = f"{v['home_team']} vs {v['away_team']}"
-            subtitle = match_date
+            location = v.get("venue", "")
+            subtitle = f"{date_part} · {location}" if location else date_part
 
         fees_dollars = round(used - net, 2)  # total dollar impact of all fees
 
@@ -608,7 +627,7 @@ renderTable();
         f.write(html)
 
 
-async def main() -> None:
+async def main(no_open: bool = False) -> None:
     print("Scraping live data...")
     rows = await build_rows()
     updated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -619,8 +638,13 @@ async def main() -> None:
     print(f"Done. {len(rows)} rows, {alerts} alerts, {positive} profit+")
     print(f"Dashboard: {DASHBOARD_PATH}")
 
-    webbrowser.open(f"file://{DASHBOARD_PATH}")
+    if not no_open:
+        webbrowser.open(f"file://{DASHBOARD_PATH}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate RTT arbitrage dashboard")
+    parser.add_argument("--no-open", action="store_true", help="Skip opening browser (for CI)")
+    args = parser.parse_args()
+    asyncio.run(main(no_open=args.no_open))

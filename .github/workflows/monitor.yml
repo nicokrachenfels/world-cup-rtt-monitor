@@ -10,6 +10,8 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -55,3 +57,20 @@ jobs:
         with:
           path: state.json
           key: rtt-state-v1-${{ github.run_number }}
+
+      - name: Generate dashboard
+        env:
+          FIFA_EMAIL: ${{ secrets.FIFA_EMAIL }}
+          FIFA_PASSWORD: ${{ secrets.FIFA_PASSWORD }}
+        run: python analyze.py --no-open
+
+      - name: Prepare Pages artifact
+        run: mkdir -p _site && cp dashboard.html _site/index.html
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: _site
+          single-commit: true
+          commit-message: "Update dashboard [${{ github.run_number }}]"
