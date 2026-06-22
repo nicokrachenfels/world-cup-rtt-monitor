@@ -106,11 +106,12 @@ async def build_rows() -> list[dict]:
         if tbd:
             round_label = _round_name(venue_code)
             # Get stadium/city from TicketData for the location subtitle
-            location = next(
-                (m.get("venue") or m.get("city", "")
-                 for m in td.values() if m.get("match_code") == venue_code),
-                ""
-            )
+            _td_m = next((m for m in td.values() if m.get("match_code") == venue_code), None)
+            if _td_m:
+                _v, _c = _td_m.get("venue", ""), _td_m.get("city", "")
+                location = f"{_v}, {_c}" if (_v and _c) else (_v or _c)
+            else:
+                location = ""
             td_teams = find_td_teams(venue_code, td) if venue_code else None
             if td_teams:
                 h, a = td_teams
@@ -174,31 +175,33 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 <title>RTT Arbitrage Monitor</title>
 <style>
   :root {{
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #22263a;
-    --border: #2d3148;
-    --text: #e8eaf6;
-    --text-dim: #8b91b8;
-    --text-muted: #555a7c;
-    --green: #22c55e;
-    --green-dim: #166534;
-    --green-bg: rgba(34,197,94,.08);
-    --red: #ef4444;
-    --red-dim: #7f1d1d;
-    --red-bg: rgba(239,68,68,.06);
-    --amber: #f59e0b;
-    --blue: #60a5fa;
-    --purple: #a78bfa;
-    --accent: #6366f1;
-    --accent2: #4f46e5;
+    --bg: #080C16;
+    --surface: #0C1220;
+    --surface2: #111826;
+    --border: #1B2640;
+    --row-border: rgba(27,38,64,.65);
+    --text: #DCE3F0;
+    --text-dim: #5B7192;
+    --text-muted: #344358;
+    --green: #05C96A;
+    --green-dim: #034D2A;
+    --green-bg: rgba(5,201,106,.05);
+    --red: #F04461;
+    --red-dim: #5A1122;
+    --red-bg: rgba(240,68,97,.05);
+    --amber: #F59E0B;
+    --blue: #4EA8DE;
+    --purple: #A78BFA;
+    --accent: #05C96A;
+    --accent2: #04A354;
+    --mono: "SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace;
   }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }}
 
   /* ── Header ── */
   header {{
-    background: linear-gradient(135deg, #1e2035 0%, #13152a 100%);
+    background: linear-gradient(135deg, #0E1828 0%, #080C16 100%);
     border-bottom: 1px solid var(--border);
     padding: 0 28px;
     height: 56px;
@@ -269,7 +272,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     cursor: pointer;
     padding: 0 2px;
   }}
-  select option {{ background: #22263a; }}
+  select option {{ background: #111826; }}
   .toggle {{
     display: flex;
     align-items: center;
@@ -286,7 +289,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   }}
   .toggle:has(input:checked) {{
     border-color: var(--accent);
-    background: rgba(99,102,241,.12);
+    background: rgba(5,201,106,.09);
     color: var(--text);
   }}
   .toggle input {{ display: none; }}
@@ -311,16 +314,14 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 
   /* ── Table ── */
   .table-wrap {{ overflow-x: auto; padding: 20px 28px 40px; }}
-  .table-clip {{
-    border-radius: 10px;
-    overflow: clip;
-    border: 1px solid var(--border);
-  }}
   table {{
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 12.5px;
     background: var(--surface);
+    box-shadow: 0 0 0 1px var(--border);
+    border-radius: 10px;
   }}
   thead {{ position: sticky; top: 56px; z-index: 10; }}
   th {{
@@ -337,24 +338,28 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     user-select: none;
     border-bottom: 1px solid var(--border);
   }}
+  thead th:first-child {{ border-top-left-radius: 10px; }}
+  thead th:last-child {{ border-top-right-radius: 10px; }}
+  tr:last-child td:first-child {{ border-bottom-left-radius: 10px; }}
+  tr:last-child td:last-child {{ border-bottom-right-radius: 10px; }}
   th:hover {{ color: var(--text); }}
   th.num {{ text-align: right; }}
   th.sorted-asc::after {{ content: " ↑"; color: var(--accent); }}
   th.sorted-desc::after {{ content: " ↓"; color: var(--accent); }}
   td {{
     padding: 9px 14px;
-    border-bottom: 1px solid rgba(45,49,72,.6);
+    border-bottom: 1px solid var(--row-border);
     white-space: nowrap;
     transition: background .1s;
   }}
   tr:last-child td {{ border-bottom: none; }}
-  tr:hover td {{ background: rgba(99,102,241,.04); }}
+  tr:hover td {{ background: rgba(5,201,106,.025); }}
   tr.alert-row td {{ background: var(--green-bg); }}
-  tr.alert-row:hover td {{ background: rgba(34,197,94,.12); }}
+  tr.alert-row:hover td {{ background: rgba(5,201,106,.10); }}
   tr.dead-row td {{ background: var(--red-bg); }}
-  .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
-  td.match-cell {{ font-weight: 500; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }}
-  td.match-cell .date-sub {{ font-size: 10.5px; color: var(--text-muted); margin-top: 1px; }}
+  .num {{ text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }}
+  td.match-cell {{ font-weight: 500; min-width: 220px; white-space: normal; }}
+  td.match-cell .date-sub {{ font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }}
 
   /* ── Number colors ── */
   .profit-pos {{ color: var(--green); font-weight: 700; }}
@@ -473,7 +478,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 </div>
 
 <div class="table-wrap">
-  <div class="table-clip">
   <table id="mainTable">
     <thead>
       <tr>
@@ -491,7 +495,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     </thead>
     <tbody id="tableBody"></tbody>
   </table>
-  </div>
   <div id="no-results">
     <div class="icon">🔍</div>
     No matches found for selected filters.
