@@ -209,6 +209,22 @@ def is_match_worth_monitoring(
     return True, "Match is active"
 
 
+def get_group_rankings(statuses: dict[str, TeamStatus]) -> dict[str, list[str]]:
+    """Returns {group_letter: [1st, 2nd, 3rd, 4th]} sorted by current standings."""
+    groups: dict[str, list] = {}
+    for team_data in statuses.values():
+        g = team_data["group"]
+        letter = g.split()[-1] if " " in g else g
+        groups.setdefault(letter, []).append(team_data)
+    return {
+        letter: [t["team"] for t in sorted(
+            teams,
+            key=lambda t: (-t["points"], -t["goal_diff"], -t["goals_for"])
+        )]
+        for letter, teams in groups.items()
+    }
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     statuses = fetch_standings()

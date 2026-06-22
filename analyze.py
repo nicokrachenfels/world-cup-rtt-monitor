@@ -14,7 +14,23 @@ sys.path.insert(0, ".")
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
 from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams
-from scraper.standings import fetch_standings, is_deadwood_match
+from scraper.standings import fetch_standings, is_deadwood_match, get_group_rankings
+
+import re as _re
+from typing import Optional
+
+_GROUP_CODE_RE = _re.compile(r'^(\d)([A-Z])$')
+
+
+def _resolve_group_code(code: str, rankings: dict) -> Optional[str]:
+    """'1H' → current 1st-place team in Group H, or None if unresolvable."""
+    m = _GROUP_CODE_RE.match(code.strip())
+    if not m:
+        return None
+    pos, group = int(m.group(1)), m.group(2)
+    teams = rankings.get(group, [])
+    return teams[pos - 1] if len(teams) >= pos else None
+
 
 CAT1_MULTIPLIER = 1.20
 BUYER_FEE = 0.20
@@ -49,6 +65,7 @@ async def build_rows() -> list[dict]:
     mins = get_min_prices_by_match(listings)
     td = scrape_all_matches()
     statuses = fetch_standings()
+    rankings = get_group_rankings(statuses)
 
     rows = []
     for v in mins.values():
@@ -77,9 +94,18 @@ async def build_rows() -> list[dict]:
             round_label = _round_name(venue_code)
             td_teams = find_td_teams(venue_code, td) if venue_code else None
             if td_teams:
-                # TicketData already has real teams confirmed for this slot
-                match_label = f"{td_teams[0]} vs {td_teams[1]}"
-                subtitle = f"{round_label} · {match_date}" if round_label else match_date
+                h, a = td_teams
+                h_proj = _resolve_group_code(h, rankings)
+                a_proj = _resolve_group_code(a, rankings)
+                if h_proj and a_proj:
+                    # Group-position codes resolved to current leaders
+                    match_label = f"{h_proj} vs {a_proj}"
+                    sub_parts = ([round_label] if round_label else []) + [match_date, "projected"]
+                    subtitle = " · ".join(sub_parts)
+                else:
+                    # Winner refs (W85) or already-confirmed teams — show as-is
+                    match_label = f"{h} vs {a}"
+                    subtitle = f"{round_label} · {match_date}" if round_label else match_date
             else:
                 match_label = round_label or venue_code or "TBD"
                 subtitle = match_date
@@ -268,7 +294,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   .table-wrap {{ overflow-x: auto; padding: 20px 28px 40px; }}
   .table-clip {{
     border-radius: 10px;
-    overflow: hidden;
+    overflow: clip;
     border: 1px solid var(--border);
   }}
   table {{

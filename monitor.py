@@ -126,7 +126,23 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     td_matches = scrape_all_matches()
     logger.info(f"TicketData returned {len(td_matches)} matches")
 
-    # ── 6. Evaluate profitability ─────────────────────────────────────────
+    # ── 6. Detect removed/sold listings ──────────────────────────────────
+    prev_keys = {k for k in state if not k.startswith("_")}
+    current_rtt_keys = set(filtered_mins.keys())
+    removed_keys = prev_keys - current_rtt_keys
+    removed_listings = [
+        {
+            "match_key": state[k]["match_key"],
+            "category": state[k].get("category", "?"),
+            "last_price": state[k]["min_price"],
+        }
+        for k in removed_keys
+        if state[k].get("match_key")
+    ]
+    if removed_listings:
+        logger.info(f"Removed from marketplace: {[r['match_key'] for r in removed_listings]}")
+
+    # ── 7. Evaluate profitability ─────────────────────────────────────────
     threshold = cfg["profit_threshold"]
     triggered: list[dict] = []
     all_profitable: list[dict] = []
@@ -190,16 +206,17 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "match_key": listing["match_key"],
         }
 
-    # ── 7. Log summary ────────────────────────────────────────────────────
+    # ── 8. Log summary ────────────────────────────────────────────────────
     logger.info(
         f"Summary: {len(all_profitable)} profitable matches, "
-        f"{len(triggered)} alert(s) triggered"
+        f"{len(triggered)} alert(s) triggered, "
+        f"{len(removed_listings)} removed from marketplace"
     )
 
     if dry_run:
         logger.info("DRY RUN — no email sent")
         _print_summary(all_profitable, triggered)
-    elif triggered or force_alert:
+    elif triggered or removed_listings or force_alert:
         sendgrid_key = _get_env("SENDGRID_API_KEY")
         from_email = _get_env("ALERT_FROM_EMAIL")
         to_email = cfg.get("alert_email") or _get_env("ALERT_EMAIL")
@@ -211,13 +228,18 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 to_email=to_email,
                 triggered_listings=triggered,
                 all_profitable_listings=all_profitable,
+                removed_listings=removed_listings,
             )
         except Exception as e:
             logger.error(f"Email send failed (state still saved): {e}")
     else:
         logger.info("No alerts triggered this run")
 
-    # ── 8. Persist state ──────────────────────────────────────────────────
+    # Remove sold/delisted listings from state so they don't reappear as "removed" next run
+    for k in removed_keys:
+        state.pop(k, None)
+
+    # ── 9. Persist state ──────────────────────────────────────────────────
     save_state(state)
     logger.info("State saved")
 
