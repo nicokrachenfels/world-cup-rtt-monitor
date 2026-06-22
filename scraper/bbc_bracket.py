@@ -42,68 +42,88 @@ def _norm(name: str) -> str:
 def _parse_bbc_text(text: str) -> list[dict]:
     """
     Parse BBC schedule page text for R32 'As it stands' matchups.
-    BBC renders each R32 card as:
+
+    Actual BBC page structure (each element appears duplicated for accessibility):
+        <DD>
+        OF
+        <JUN|JUL>
+        As it stands   (× 2 — one label per team side)
         As it stands
-        <Team1>
-        <Team2>
-        <DAY>  <HH:MM>  <DD> <MON>
+        <Home team>    (× 2)
+        <Home team>
+        plays
+        <Away team>    (× 2)
+        <Away team>
+        AT
+        <HH:MM>        (× 2)
+        <HH:MM>
+        ON
+        <MON|TUE|...>
+
+    Strategy: anchor on "plays", look backward for home team, forward for away team.
     """
     lines = [l.strip() for l in text.splitlines() if l.strip()]
-    # Strip non-ASCII (flag emojis etc.) from every line
     lines = [re.sub(r'[^\x00-\x7F]+', '', l).strip() for l in lines]
     lines = [l for l in lines if l]
 
     MONTHS = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
               "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"}
-    DAY_ABBRS = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"}
-    # Lines to skip when looking for team names
+    _JUNK = {
+        "as it stands", "plays", "at", "on", "of", "scheduled", "(active)",
+        "last 32", "last 16", "quarter-finals", "semi-finals", "final",
+        "third place", "third-place play-off",
+    }
     _skip = re.compile(
-        r'^\d{1,2}:\d{2}$'          # time "21:30"
+        r'^\d{1,2}:\d{2}$'
         r'|^(MON|TUE|WED|THU|FRI|SAT|SUN)$'
-        r'|^\d{1,2}$'               # bare day numbers
-        r'|^Last \d+$'              # "Last 32"
-        r'|^Scheduled$'
-        r'|^W-\d+-\d+$'             # bracket ref labels like W-32-1
+        r'|^\d{1,2}$'
+        r'|^W[-.]'
+        r'|^L[-.]'
     )
 
+    def _is_junk(ln: str) -> bool:
+        return _skip.match(ln) is not None or ln.lower() in _JUNK or ln.upper() in MONTHS
+
     results = []
-    i = 0
-    while i < len(lines):
-        if lines[i] == "As it stands":
-            # Collect next two non-skippable lines as team names
-            teams: list[str] = []
-            j = i + 1
-            while j < len(lines) and len(teams) < 2:
-                ln = lines[j]
-                if _skip.match(ln) or not ln or len(ln) < 2:
-                    j += 1
-                    continue
-                teams.append(ln)
-                j += 1
+    for i, line in enumerate(lines):
+        if line.lower() != "plays":
+            continue
 
-            # Find date: look for "DD JUN/JUL" pattern nearby
-            date_str = ""
-            k = j
-            while k < min(j + 6, len(lines)):
-                m = re.search(
-                    r'(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)',
-                    lines[k], re.I
-                )
-                if m:
-                    day, month = int(m.group(1)), m.group(2).upper()
-                    date_str = f"{month} {day}"
-                    break
-                k += 1
+        # Home team: nearest real team name scanning backward
+        home = None
+        for j in range(i - 1, max(i - 8, -1), -1):
+            if not _is_junk(lines[j]):
+                home = lines[j]
+                break
 
-            if len(teams) == 2 and teams[0] and teams[1]:
-                results.append({
-                    "home": teams[0],
-                    "away": teams[1],
-                    "date": date_str,
-                })
-            i = j
-        else:
-            i += 1
+        # Away team: first real team name scanning forward
+        away = None
+        for j in range(i + 1, min(i + 8, len(lines))):
+            if not _is_junk(lines[j]):
+                away = lines[j]
+                break
+
+        # Date: scan backward for month, then find day number via "DD OF MON" pattern
+        date_str = ""
+        for j in range(i - 1, max(i - 16, -1), -1):
+            if lines[j].upper() in MONTHS:
+                month = lines[j].upper()
+                # Look for "OF" at j-1 and day digit at j-2
+                if j >= 2 and lines[j - 1].upper() == "OF" and lines[j - 2].isdigit():
+                    date_str = f"{month} {int(lines[j - 2])}"
+                elif j >= 1 and lines[j - 1].isdigit():
+                    date_str = f"{month} {int(lines[j - 1])}"
+                break
+
+        # Skip if teams look like bracket references (W-32-1 etc.)
+        if not home or not away:
+            continue
+        if re.match(r'^W[-.]|^L[-.]', home) or re.match(r'^W[-.]|^L[-.]', away):
+            continue
+        if home == away:
+            continue
+
+        results.append({"home": home, "away": away, "date": date_str})
 
     return results
 
@@ -156,17 +176,19 @@ async def scrape_bbc_bracket() -> list[dict]:
                     except Exception:
                         pass
 
-                # Click "Knockout Stage" tab if present
+                # Click "Knockout Stage" tab — BBC uses text link
+                await asyncio.sleep(2)
                 for tab_sel in [
-                    'a[href*="KnockoutStage"]',
+                    'a:text("Knockout Stage")',
                     'button:text("Knockout Stage")',
+                    'a[href*="KnockoutStage"]',
                     '[data-testid*="knockout"]',
                 ]:
                     try:
                         tab = page.locator(tab_sel)
                         if await tab.count() > 0:
                             await tab.first.click(timeout=5_000)
-                            await page.wait_for_load_state("networkidle", timeout=10_000)
+                            await asyncio.sleep(2)
                             break
                     except Exception:
                         pass
