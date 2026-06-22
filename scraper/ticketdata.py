@@ -36,6 +36,39 @@ def scrape_all_matches() -> dict[str, dict]:
     preview = html[:300].replace("\n", " ")
     logger.info(f"TicketData HTML preview: {preview!r}")
 
+    # Log API URLs and NEXT_DATA structure for debugging
+    import json as _json
+    api_urls = re.findall(r'["\'](/api/[^"\'?#]{3,60})["\']', html)
+    logger.info(f"API paths found in HTML: {list(set(api_urls))[:15]}")
+
+    # Log __NEXT_DATA__ top-level keys to find where events live
+    next_match = re.search(r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', html, re.DOTALL)
+    if next_match:
+        try:
+            nd = _json.loads(next_match.group(1))
+            def _keys(obj, prefix="", depth=0):
+                if depth > 3 or not isinstance(obj, dict): return
+                for k, v in obj.items():
+                    p = f"{prefix}.{k}" if prefix else k
+                    logger.info(f"  NEXT_DATA key: {p} ({type(v).__name__}, len={len(v) if isinstance(v, (list,dict,str)) else '-'})")
+                    _keys(v, p, depth+1)
+            _keys(nd)
+        except Exception as e:
+            logger.info(f"NEXT_DATA parse error: {e}")
+
+    # Also try calling common event API patterns directly
+    for api_path in [
+        "/api/events?performer=world-cup-soccer",
+        "/api/performer/world-cup-soccer/events",
+        "/api/events?view=matches&performer=world-cup-soccer",
+    ]:
+        try:
+            api_resp = scraper.get(f"https://www.ticketdata.com{api_path}", timeout=10)
+            if api_resp.status_code == 200 and api_resp.text.strip().startswith("{"):
+                logger.info(f"API hit {api_path}: {api_resp.text[:200]}")
+        except Exception:
+            pass
+
     matches = _parse_matches_html(html)
     logger.info(f"Parsed {len(matches)} matches from TicketData")
     return matches
