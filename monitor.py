@@ -204,6 +204,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "get_in_price": get_in,
             "margin": margin,
             "match_key": listing["match_key"],
+            "category": listing["category"],
         }
 
     # ── 8. Log summary ────────────────────────────────────────────────────

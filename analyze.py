@@ -323,7 +323,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     box-shadow: 0 0 0 1px var(--border);
     border-radius: 10px;
   }}
-  thead {{ position: sticky; top: 56px; z-index: 10; }}
+  thead {{ position: sticky; top: 56px; z-index: 20; background: var(--surface2); }}
   th {{
     background: var(--surface2);
     padding: 10px 14px;
@@ -429,7 +429,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   <h1><span class="icon">⚽</span> RTT Arbitrage Monitor</h1>
   <div class="meta">
     <div class="dot"></div>
-    <span>Updated {updated_at}</span>
+    <span id="updatedAt" data-utc="{updated_at}">Updated {updated_at}</span>
   </div>
 </header>
 
@@ -622,6 +622,17 @@ document.querySelectorAll("th[data-col]").forEach(th => {{
 
 document.querySelector('th[data-col="margin"]').classList.add("sorted-desc");
 renderTable();
+
+(function() {{
+  const el = document.getElementById("updatedAt");
+  if (!el) return;
+  const d = new Date(el.dataset.utc);
+  if (isNaN(d)) return;
+  el.textContent = "Updated " + d.toLocaleString(undefined, {{
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit"
+  }});
+}})();
 </script>
 </body>
 </html>"""
@@ -633,7 +644,7 @@ renderTable();
 async def main(no_open: bool = False) -> None:
     print("Scraping live data...")
     rows = await build_rows()
-    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+    updated_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
     generate_dashboard(rows, updated_at)
 
     alerts = sum(1 for r in rows if r["alert"])
