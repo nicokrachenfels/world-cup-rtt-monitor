@@ -126,12 +126,26 @@ async def build_rows() -> list[dict]:
                     proj_suffix = ""
                 match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
             else:
-                if round_label and venue_code:
-                    match_label = f"{round_label} ({venue_code})"
-                elif round_label:
-                    match_label = round_label
+                # find_td_teams returned None — one or both teams are "TBD" in TicketData.
+                # _td_m is already fetched; try partial projection from whatever team info it has.
+                if _td_m:
+                    h_raw = _td_m.get("home_team", "TBD").strip("() ")
+                    a_raw = _td_m.get("away_team", "TBD").strip("() ")
+                    # Treat TicketData placeholder titles as TBD
+                    if _re.match(r'^World Cup Match\b', h_raw, _re.I): h_raw = "TBD"
+                    if _re.match(r'^World Cup Match\b', a_raw, _re.I): a_raw = "TBD"
+                    if h_raw != "TBD" or a_raw != "TBD":
+                        h_proj = _resolve_group_code(h_raw, rankings) if h_raw != "TBD" else None
+                        a_proj = _resolve_group_code(a_raw, rankings) if a_raw != "TBD" else None
+                        h_str = h_proj or h_raw
+                        a_str = a_proj or a_raw
+                        proj_suffix = " (projected)" if (h_proj or a_proj) else ""
+                        teams_str = f"{h_str} vs {a_str}"
+                        match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
+                    else:
+                        match_label = f"{round_label} ({venue_code})" if (round_label and venue_code) else (round_label or venue_code or "TBD")
                 else:
-                    match_label = venue_code or "TBD"
+                    match_label = f"{round_label} ({venue_code})" if (round_label and venue_code) else (round_label or venue_code or "TBD")
             subtitle = f"{date_part} · {location}" if location else date_part
         else:
             match_label = f"{v['home_team']} vs {v['away_team']}"
