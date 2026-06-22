@@ -13,7 +13,7 @@ from datetime import datetime
 sys.path.insert(0, ".")
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
-from scraper.ticketdata import scrape_all_matches, find_get_in_price
+from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams
 from scraper.standings import fetch_standings, is_deadwood_match
 
 CAT1_MULTIPLIER = 1.20
@@ -27,6 +27,21 @@ DASHBOARD_PATH = os.path.join(os.path.dirname(__file__), "dashboard.html")
 
 def seller_net(get_in: float) -> float:
     return get_in / (1 + BUYER_FEE) * (1 - SELLER_FEE)
+
+
+def _round_name(match_code: str) -> str:
+    try:
+        n = int(match_code[1:])
+    except (ValueError, IndexError):
+        return ""
+    if n <= 72:  return ""
+    if n <= 88:  return "Round of 32"
+    if n <= 96:  return "Round of 16"
+    if n <= 100: return "Quarter-final"
+    if n <= 102: return "Semi-final"
+    if n == 103: return "3rd Place"
+    if n == 104: return "Final"
+    return "Knockout"
 
 
 async def build_rows() -> list[dict]:
@@ -55,20 +70,32 @@ async def build_rows() -> list[dict]:
         margin = profit / rtt_price
         dead = is_deadwood_match(v["home_team"], v["away_team"], statuses)
         tbd = v["home_team"] == "TBD"
+        venue_code = v.get("venue", "")
+        match_date = v.get("match_date", "Unknown")
 
         if tbd:
-            match_label = f"{v.get('venue', '?')} {v.get('match_date', '?')} TBD"
+            round_label = _round_name(venue_code)
+            td_teams = find_td_teams(venue_code, td) if venue_code else None
+            if td_teams:
+                # TicketData already has real teams confirmed for this slot
+                match_label = f"{td_teams[0]} vs {td_teams[1]}"
+                subtitle = f"{round_label} · {match_date}" if round_label else match_date
+            else:
+                match_label = round_label or venue_code or "TBD"
+                subtitle = match_date
         else:
             match_label = f"{v['home_team']} vs {v['away_team']}"
+            subtitle = match_date
 
         fees_dollars = round(used - net, 2)  # total dollar impact of all fees
 
         rows.append({
             "match": match_label,
+            "subtitle": subtitle,
             "home": v["home_team"],
             "away": v["away_team"],
-            "venue": v.get("venue", "Unknown"),
-            "date": v.get("match_date", "Unknown"),
+            "venue": venue_code,
+            "date": match_date,
             "cat": cat,
             "rtt": rtt_price,
             "td_floor": td_floor,
@@ -239,14 +266,16 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 
   /* ── Table ── */
   .table-wrap {{ overflow-x: auto; padding: 20px 28px 40px; }}
+  .table-clip {{
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }}
   table {{
     width: 100%;
     border-collapse: collapse;
     font-size: 12.5px;
     background: var(--surface);
-    border-radius: 10px;
-    overflow: hidden;
-    border: 1px solid var(--border);
   }}
   thead {{ position: sticky; top: 56px; z-index: 10; }}
   th {{
@@ -399,6 +428,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 </div>
 
 <div class="table-wrap">
+  <div class="table-clip">
   <table id="mainTable">
     <thead>
       <tr>
@@ -416,6 +446,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     </thead>
     <tbody id="tableBody"></tbody>
   </table>
+  </div>
   <div id="no-results">
     <div class="icon">🔍</div>
     No matches found for selected filters.
@@ -437,11 +468,17 @@ function fmt(n) {{
 }}
 
 function fmtDate(d) {{
-  if (!d || d === "Unknown") return d;
-  // "2026-07-04" → "Jul 4"
+  if (!d || d === "Unknown") return "";
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  // "JUN 25" format from FIFA RTT
+  const MON = {{JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11}};
+  const parts = d.split(" ");
+  if (parts.length === 2 && MON[parts[0]] !== undefined)
+    return `${{MONTHS[MON[parts[0]]]}} ${{parseInt(parts[1])}}`;
+  // "2026-07-04" fallback
   const [, m, day] = d.split("-");
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return `${{months[parseInt(m)-1]}} ${{parseInt(day)}}`;
+  if (m) return `${{MONTHS[+m-1]}} ${{+day}}`;
+  return d;
 }}
 
 function renderTable() {{
@@ -499,12 +536,12 @@ function renderTable() {{
     if (r.dead) flags.push('<span class="badge badge-dead">DEAD</span>');
     if (r.tbd) flags.push('<span class="badge badge-tbd">TBD</span>');
 
-    const dateFmt = fmtDate(r.date);
+    const sub = r.subtitle || fmtDate(r.date);
 
     tbody.innerHTML += `<tr class="${{rowClass}}">
       <td class="match-cell">
         <div>${{r.match}}</div>
-        <div class="date-sub">${{dateFmt}}</div>
+        ${{sub ? `<div class="date-sub">${{sub}}</div>` : ""}}
       </td>
       <td><span class="cat-pill ${{catClass}}">Cat ${{r.cat}}</span></td>
       <td class="num dim">$${{fmt(r.rtt)}}</td>

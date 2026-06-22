@@ -164,6 +164,18 @@ def scrape_all_matches() -> dict[str, dict]:
     return matches
 
 
+def find_td_teams(match_code: str, td_matches: dict[str, dict]) -> Optional[tuple[str, str]]:
+    """Return (home, away) from TicketData for a match code, or None if not found / still TBD."""
+    for match_data in td_matches.values():
+        if match_data.get("match_code") == match_code:
+            h = match_data.get("home_team", "TBD")
+            a = match_data.get("away_team", "TBD")
+            if h != "TBD" and a != "TBD":
+                return h, a
+            return None
+    return None
+
+
 def find_get_in_price(
     home_team: str,
     away_team: str,
