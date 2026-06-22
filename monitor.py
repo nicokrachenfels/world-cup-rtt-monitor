@@ -66,9 +66,32 @@ def _get_env(key: str, required: bool = True) -> Optional[str]:
     return val
 
 
-async def run(dry_run: bool = False, force_alert: bool = False) -> None:
+async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool = False) -> None:
     cfg = load_config()
     state = load_state()
+
+    # ── 0. Test-email short-circuit ───────────────────────────────────────
+    if test_email:
+        sendgrid_key = _get_env("SENDGRID_API_KEY")
+        from_email = _get_env("ALERT_FROM_EMAIL")
+        to_email = cfg.get("alert_email") or _get_env("ALERT_EMAIL")
+        send_alert(
+            sendgrid_api_key=sendgrid_key,
+            from_email=from_email,
+            to_email=to_email,
+            triggered_listings=[{
+                "match_key": "TEST — credential check",
+                "category": "N/A",
+                "rtt_price": 0,
+                "get_in_price": 0,
+                "seller_net": 0,
+                "profit_margin": 0,
+                "profit_dollars": 0,
+            }],
+            all_profitable_listings=[],
+        )
+        logger.info("Test email sent successfully")
+        return
 
     # ── 1. Fetch standings ────────────────────────────────────────────────
     logger.info("Fetching World Cup standings...")
@@ -222,6 +245,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RTT arbitrage monitor")
     parser.add_argument("--dry-run", action="store_true", help="Print results without sending email")
     parser.add_argument("--force-alert", action="store_true", help="Send alert even if no new price low")
+    parser.add_argument("--test-email", action="store_true", help="Send a test email to verify SendGrid credentials, then exit")
     args = parser.parse_args()
 
-    asyncio.run(run(dry_run=args.dry_run, force_alert=args.force_alert))
+    asyncio.run(run(dry_run=args.dry_run, force_alert=args.force_alert, test_email=args.test_email))
