@@ -319,10 +319,11 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   .toggle:has(input:checked) .pip::after {{ transform: translateX(12px); }}
 
   /* ── Table ── */
-  .table-wrap {{ overflow-x: auto; padding: 20px 28px 40px; }}
+  .table-wrap {{ padding: 20px 28px 40px; }}
   table {{
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 12.5px;
     background: var(--surface);
     border: 1px solid var(--border);
