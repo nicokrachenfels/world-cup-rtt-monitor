@@ -31,7 +31,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install Playwright Chromium
-        run: playwright install chromium --with-deps
+        run: |
+          sudo apt-get install -y libasound2t64
+          playwright install chromium --with-deps
 
       - name: Restore monitor state
         uses: actions/cache@v4
