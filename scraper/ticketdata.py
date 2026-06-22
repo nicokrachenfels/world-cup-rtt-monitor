@@ -42,6 +42,15 @@ async def scrape_all_matches() -> dict[str, dict]:
             logger.info("Loading TicketData World Cup matches page...")
             await page.goto(TICKETDATA_MATCHES_URL, wait_until="domcontentloaded", timeout=30_000)
 
+            # Wait longer for JS to fully render
+            await asyncio.sleep(5)
+
+            # Log page title and first 500 chars to diagnose blocks/redirects
+            title = await page.title()
+            body_preview = await page.evaluate("document.body.innerText.slice(0, 500)")
+            logger.info(f"TicketData page title: {title!r}")
+            logger.info(f"TicketData body preview: {body_preview!r}")
+
             # Scroll to trigger lazy loading of all match rows
             await _scroll_to_bottom(page)
 

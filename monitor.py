@@ -91,6 +91,8 @@ async def run(dry_run: bool = False, force_alert: bool = False) -> None:
 
     rtt_mins = get_min_prices_by_match(fifa_listings)
     logger.info(f"Unique match+category combinations: {len(rtt_mins)}")
+    for k, v in rtt_mins.items():
+        logger.info(f"  RTT: {v['match_key']} | Cat {v['category']} | ${v['min_price']:,.0f}")
 
     # ── 3. Filter by team status ─────────────────────────────────────────
     filtered_mins = {}
