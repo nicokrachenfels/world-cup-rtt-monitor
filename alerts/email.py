@@ -138,6 +138,7 @@ def _html_table(rows: str) -> str:
         "<th style='padding:6px'>RTT Min</th>"
         "<th style='padding:6px'>Get-In</th>"
         "<th style='padding:6px'>Seller Net</th>"
+        "<th style='padding:6px'>Profit $</th>"
         "<th style='padding:6px'>Profit %</th>"
         "<th style='padding:6px'>Cat</th>"
         "</tr>"
@@ -154,12 +155,15 @@ def _render_table_rows(listings: list[dict]) -> str:
     rows = []
     for t in sorted(listings, key=lambda x: -x["profit_margin"]):
         color = "#1e8e3e" if t["profit_margin"] >= 0.20 else "#188038"
+        profit_d = t.get("profit_dollars", t["seller_net"] - t["rtt_price"])
+        profit_str = f"+${profit_d:,.0f}" if profit_d >= 0 else f"-${abs(profit_d):,.0f}"
         rows.append(
             f"<tr style='border-bottom:1px solid #e0e0e0'>"
             f"<td style='padding:6px'>{t['match_key']}</td>"
             f"<td style='padding:6px;text-align:right'>${t['rtt_price']:,.0f}</td>"
             f"<td style='padding:6px;text-align:right'>${t['get_in_price']:,.0f}</td>"
             f"<td style='padding:6px;text-align:right'>${t['seller_net']:,.0f}</td>"
+            f"<td style='padding:6px;text-align:right;color:{color};font-weight:bold'>{profit_str}</td>"
             f"<td style='padding:6px;text-align:right;color:{color};font-weight:bold'>"
             f"{t['profit_margin']:.1%}</td>"
             f"<td style='padding:6px;text-align:center'>{t.get('category','?')}</td>"
@@ -177,7 +181,8 @@ def _build_text_body(triggered: list[dict], all_profitable: list[dict], removed:
             lines.append(
                 f"  {t['match_key']} | Cat {t.get('category','?')} | "
                 f"RTT ${t['rtt_price']:,.0f} | Get-in ${t['get_in_price']:,.0f} | "
-                f"Seller net ${t['seller_net']:,.0f} | Profit {t['profit_margin']:.1%}"
+                f"Seller net ${t['seller_net']:,.0f} | "
+                f"Profit +${t.get('profit_dollars', 0):,.0f} / {t['profit_margin']:.1%}"
             )
 
     if removed:
