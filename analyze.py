@@ -314,12 +314,13 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 
   /* ── Table ── */
   .table-wrap {{ overflow-x: auto; padding: 20px 28px 40px; }}
-  .table-inner {{ border: 1px solid var(--border); border-radius: 8px; overflow: clip; }}
   table {{
     width: 100%;
     border-collapse: collapse;
     font-size: 12.5px;
     background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
   }}
   thead {{ position: sticky; top: 56px; z-index: 20; background: var(--surface2); }}
   th {{
@@ -472,7 +473,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 </div>
 
 <div class="table-wrap">
-  <div class="table-inner">
   <table id="mainTable">
     <thead>
       <tr>
@@ -490,7 +490,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     </thead>
     <tbody id="tableBody"></tbody>
   </table>
-  </div>
   <div id="no-results">
     <div class="icon">🔍</div>
     No matches found for selected filters.
