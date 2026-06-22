@@ -243,6 +243,60 @@ def find_get_in_price(
     return None
 
 
+def find_td_match(
+    home_team: str,
+    away_team: str,
+    td_matches: dict[str, dict],
+    venue: Optional[str] = None,
+    date_str: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Same fuzzy matching as find_get_in_price but returns the full TicketData entry dict.
+    Used to get venue name and city for display in the dashboard subtitle.
+    """
+    if not td_matches:
+        return None
+
+    if home_team == "TBD" or away_team == "TBD":
+        if not venue:
+            return None
+        if re.match(r"^M\d+$", venue.strip()):
+            for match_data in td_matches.values():
+                if match_data.get("match_code") == venue.strip():
+                    return match_data
+        if date_str:
+            city_norm = _normalize_city(venue)
+            rtt_month, rtt_day = _parse_rtt_date(date_str)
+            if rtt_month > 0:
+                for match_data in td_matches.values():
+                    td_city = _normalize_city(match_data.get("city", ""))
+                    td_month, td_day = _parse_td_date(match_data.get("match_date", ""))
+                    if td_city == city_norm and td_month == rtt_month and td_day == rtt_day:
+                        return match_data
+        return None
+
+    home_norm = _normalize_team(home_team)
+    away_norm = _normalize_team(away_team)
+    best_entry: Optional[dict] = None
+    best_score = 0
+
+    for match_data in td_matches.values():
+        td_home = _normalize_team(match_data.get("home_team", ""))
+        td_away = _normalize_team(match_data.get("away_team", ""))
+
+        def _match_score(a: str, b: str) -> int:
+            return 1 if (a in b or b in a) and min(len(a), len(b)) >= 3 else 0
+
+        score = _match_score(home_norm, td_home) + _match_score(away_norm, td_away)
+        score_rev = _match_score(home_norm, td_away) + _match_score(away_norm, td_home)
+        score = max(score, score_rev)
+        if score > best_score:
+            best_score = score
+            best_entry = match_data
+
+    return best_entry if best_score >= 2 else None
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     matches = scrape_all_matches()

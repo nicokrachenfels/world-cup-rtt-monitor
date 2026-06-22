@@ -13,7 +13,7 @@ from datetime import datetime
 sys.path.insert(0, ".")
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
-from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams
+from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams, find_td_match
 from scraper.standings import fetch_standings, is_deadwood_match, get_group_rankings
 
 import re as _re
@@ -130,7 +130,13 @@ async def build_rows() -> list[dict]:
             subtitle = f"{date_part} · {location}" if location else date_part
         else:
             match_label = f"{v['home_team']} vs {v['away_team']}"
-            location = v.get("venue", "")
+            _td_m = find_td_match(v["home_team"], v["away_team"], td,
+                                  venue=venue_code, date_str=match_date)
+            if _td_m:
+                _v, _c = _td_m.get("venue", ""), _td_m.get("city", "")
+                location = f"{_v}, {_c}" if (_v and _c) else (_v or _c)
+            else:
+                location = venue_code
             subtitle = f"{date_part} · {location}" if location else date_part
 
         fees_dollars = round(used - net, 2)  # total dollar impact of all fees
@@ -320,10 +326,12 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     font-size: 12.5px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
   }}
-  thead {{ position: sticky; top: 56px; z-index: 20; background: var(--surface2); }}
+  thead {{ background: var(--surface2); }}
   th {{
+    position: sticky;
+    top: 56px;
+    z-index: 20;
     background: var(--surface2);
     padding: 10px 14px;
     text-align: left;
@@ -331,7 +339,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: .07em;
-    color: var(--text-dim);
+    color: var(--text);
     cursor: pointer;
     white-space: nowrap;
     user-select: none;
@@ -354,7 +362,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   tr.dead-row td {{ background: var(--red-bg); }}
   .num {{ text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }}
   td.match-cell {{ font-weight: 500; min-width: 220px; white-space: normal; }}
-  td.match-cell .date-sub {{ font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }}
+  td.match-cell .date-sub {{ font-size: 10.5px; color: #6B84A2; margin-top: 2px; }}
 
   /* ── Number colors ── */
   .profit-pos {{ color: var(--green); font-weight: 700; }}
