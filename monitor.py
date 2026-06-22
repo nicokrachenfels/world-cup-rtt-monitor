@@ -146,10 +146,12 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     threshold = cfg["profit_threshold"]
     triggered: list[dict] = []
     all_profitable: list[dict] = []
+    new_listings: list[dict] = []  # brand-new RTTs that aren't yet profitable
 
     dollar_threshold = cfg.get("profit_dollar_threshold", 300)
 
     for composite_key, listing in filtered_mins.items():
+        is_brand_new = composite_key not in prev_keys
         rtt_price = listing["min_price"]
         get_in = find_get_in_price(
             listing["home_team"], listing["away_team"], td_matches,
@@ -158,6 +160,14 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
 
         if get_in is None:
             logger.debug(f"No get-in price for {listing['match_key']} — skipping profit calc")
+            if is_brand_new:
+                new_listings.append({
+                    "match_key": listing["match_key"],
+                    "category": listing["category"],
+                    "rtt_price": rtt_price,
+                    "get_in_price": None,
+                    "profit_margin": None,
+                })
             continue
 
         seller_net, margin = compute_profit(rtt_price, get_in, cfg)
@@ -197,6 +207,19 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 logger.info(
                     f"Profitable but not new low: {listing['match_key']} {margin:.1%}"
                 )
+        elif is_brand_new:
+            # New listing that isn't profitable yet — track supply movement
+            new_listings.append({
+                "match_key": listing["match_key"],
+                "category": listing["category"],
+                "rtt_price": rtt_price,
+                "get_in_price": get_in,
+                "profit_margin": margin,
+            })
+            logger.info(
+                f"New listing (not profitable): {listing['match_key']} Cat {listing['category']} | "
+                f"RTT ${rtt_price:,.0f} | Margin {margin:.1%}"
+            )
 
         # Update state regardless
         state[composite_key] = {
@@ -211,13 +234,14 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     logger.info(
         f"Summary: {len(all_profitable)} profitable matches, "
         f"{len(triggered)} alert(s) triggered, "
+        f"{len(new_listings)} new non-profitable listings, "
         f"{len(removed_listings)} removed from marketplace"
     )
 
     if dry_run:
         logger.info("DRY RUN — no email sent")
         _print_summary(all_profitable, triggered)
-    elif triggered or removed_listings or force_alert:
+    elif triggered or removed_listings or new_listings or force_alert:
         sendgrid_key = _get_env("SENDGRID_API_KEY")
         from_email = _get_env("ALERT_FROM_EMAIL")
         to_email = cfg.get("alert_email") or _get_env("ALERT_EMAIL")
@@ -230,6 +254,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 triggered_listings=triggered,
                 all_profitable_listings=all_profitable,
                 removed_listings=removed_listings,
+                new_listings=new_listings,
             )
         except Exception as e:
             logger.error(f"Email send failed (state still saved): {e}")

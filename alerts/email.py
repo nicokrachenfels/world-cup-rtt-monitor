@@ -18,13 +18,14 @@ def send_alert(
     triggered_listings: list[dict],
     all_profitable_listings: list[dict],
     removed_listings: list[dict] = [],
+    new_listings: list[dict] = [],
 ) -> None:
-    if not triggered_listings and not removed_listings:
+    if not triggered_listings and not removed_listings and not new_listings:
         return
 
-    subject = _build_subject(triggered_listings, removed_listings)
-    html_body = _build_html_body(triggered_listings, all_profitable_listings, removed_listings)
-    text_body = _build_text_body(triggered_listings, all_profitable_listings, removed_listings)
+    subject = _build_subject(triggered_listings, removed_listings, new_listings)
+    html_body = _build_html_body(triggered_listings, all_profitable_listings, removed_listings, new_listings)
+    text_body = _build_text_body(triggered_listings, all_profitable_listings, removed_listings, new_listings)
 
     payload = json.dumps({
         "personalizations": [{"to": [{"email": to_email}]}],
@@ -60,31 +61,91 @@ def send_alert(
         raise
 
 
-def _build_subject(triggered: list[dict], removed: list[dict] = []) -> str:
+def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings: list[dict] = []) -> str:
     if triggered and len(triggered) == 1:
         t = triggered[0]
-        suffix = f" | {len(removed)} removed" if removed else ""
+        extras = []
+        if removed:
+            extras.append(f"{len(removed)} removed")
+        if new_listings:
+            extras.append(f"{len(new_listings)} new")
+        suffix = f" | {', '.join(extras)}" if extras else ""
         return (
             f"RTT Alert: {t['match_key']} | "
             f"{t['profit_margin']:.0%} profit | "
             f"RTT ${t['rtt_price']:,.0f} vs ${t['get_in_price']:,.0f} get-in{suffix}"
         )
     if triggered:
-        suffix = f" | {len(removed)} removed" if removed else ""
+        extras = []
+        if removed:
+            extras.append(f"{len(removed)} removed")
+        if new_listings:
+            extras.append(f"{len(new_listings)} new")
+        suffix = f" | {', '.join(extras)}" if extras else ""
         return (
             f"RTT Alert: {len(triggered)} new opportunities | "
             f"Best: {max(t['profit_margin'] for t in triggered):.0%} profit{suffix}"
         )
-    return f"RTT Activity: {len(removed)} listing(s) removed from marketplace"
+    if new_listings and not removed:
+        return f"RTT Supply: {len(new_listings)} new listing(s) on marketplace"
+    parts = []
+    if removed:
+        parts.append(f"{len(removed)} removed")
+    if new_listings:
+        parts.append(f"{len(new_listings)} new")
+    return f"RTT Activity: {', '.join(parts)}"
 
 
-def _build_html_body(triggered: list[dict], all_profitable: list[dict], removed: list[dict] = []) -> str:
+def _build_html_body(triggered: list[dict], all_profitable: list[dict], removed: list[dict] = [], new_listings: list[dict] = []) -> str:
     sections = []
 
     if triggered:
         sections.append(
             "<h2 style='color:#1a73e8;margin-bottom:12px'>New RTT Arbitrage Opportunity</h2>"
             + _html_table(_render_table_rows(triggered))
+        )
+
+    if new_listings:
+        def _margin_str(m):
+            if m is None:
+                return "—"
+            color = "#1e8e3e" if m >= 0 else "#c0392b"
+            return f"<span style='color:{color}'>{m:.1%}</span>"
+
+        def _get_in_str(r):
+            g = r.get("get_in_price")
+            return f"${g:,.0f}" if g else "—"
+
+        new_rows = "".join(
+            f"<tr style='border-bottom:1px solid #e0e0e0'>"
+            f"<td style='padding:6px'>{r['match_key']}</td>"
+            f"<td style='padding:6px;text-align:center'>Cat {r['category']}</td>"
+            f"<td style='padding:6px;text-align:right'>${r['rtt_price']:,.0f}</td>"
+            f"<td style='padding:6px;text-align:right'>{_get_in_str(r)}</td>"
+            f"<td style='padding:6px;text-align:right'>{_margin_str(r.get('profit_margin'))}</td>"
+            f"</tr>"
+            for r in sorted(new_listings, key=lambda x: x["match_key"])
+        )
+        new_header = (
+            "<tr>"
+            "<th style='text-align:left;padding:6px'>Match</th>"
+            "<th style='padding:6px'>Cat</th>"
+            "<th style='padding:6px'>RTT Price</th>"
+            "<th style='padding:6px'>Get-In</th>"
+            "<th style='padding:6px'>Margin</th>"
+            "</tr>"
+        )
+        new_table = (
+            "<table style='border-collapse:collapse;width:100%'>"
+            f"<thead style='background:#f1f3f4'>{new_header}</thead>"
+            f"<tbody>{new_rows}</tbody>"
+            "</table>"
+        )
+        sections.append(
+            "<h3 style='color:#555;margin:24px 0 8px'>New Supply</h3>"
+            "<p style='color:#888;font-size:12px;margin-bottom:8px'>"
+            "First-time listings — not yet profitable</p>"
+            + new_table
         )
 
     if removed:
@@ -172,7 +233,7 @@ def _render_table_rows(listings: list[dict]) -> str:
     return "".join(rows)
 
 
-def _build_text_body(triggered: list[dict], all_profitable: list[dict], removed: list[dict] = []) -> str:
+def _build_text_body(triggered: list[dict], all_profitable: list[dict], removed: list[dict] = [], new_listings: list[dict] = []) -> str:
     lines = []
 
     if triggered:
@@ -183,6 +244,16 @@ def _build_text_body(triggered: list[dict], all_profitable: list[dict], removed:
                 f"RTT ${t['rtt_price']:,.0f} | Get-in ${t['get_in_price']:,.0f} | "
                 f"Seller net ${t['seller_net']:,.0f} | "
                 f"Profit +${t.get('profit_dollars', 0):,.0f} / {t['profit_margin']:.1%}"
+            )
+
+    if new_listings:
+        lines.append("\n=== NEW SUPPLY (first-time listings, not yet profitable) ===\n")
+        for r in sorted(new_listings, key=lambda x: x["match_key"]):
+            get_in_str = f"${r['get_in_price']:,.0f}" if r.get("get_in_price") else "—"
+            margin_str = f"{r['profit_margin']:.1%}" if r.get("profit_margin") is not None else "—"
+            lines.append(
+                f"  {r['match_key']} | Cat {r['category']} | "
+                f"RTT ${r['rtt_price']:,.0f} | Get-in {get_in_str} | Margin {margin_str}"
             )
 
     if removed:
