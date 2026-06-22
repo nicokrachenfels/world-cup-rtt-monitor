@@ -226,21 +226,20 @@ def _parse_raw_listing(raw: dict) -> Optional[RTTListing]:
             break
 
     # ── Venue ────────────────────────────────────────────────────────────────
-    # Format: "City · Stadium Name"  e.g. "New York/New Jersey · New York New Jersey Stadium"
+    # Card may have "M85 · Round of 32" and/or "Vancouver · BC Place Stadium".
+    # Prefer the M-code line; fall back to the first city/stadium line.
     venue = "Unknown"
+    venue_fallback = "Unknown"
     for line in lines:
         if "·" in line and "$" not in line and "CAT" not in line.upper():
-            venue = line.split("·")[0].strip()
-            break
-
-    # If venue still Unknown, try to extract match code (e.g. "M85" from "M85 · Round of 32")
-    if venue == "Unknown":
-        import re as _re2
-        for line in lines:
-            m = _re2.match(r'^(M\d+)\b', line.strip())
-            if m:
-                venue = m.group(1)
+            left = re.sub(r'[^\x00-\x7F]', '', line.split("·")[0]).strip()
+            if re.match(r'^M\d+$', left):
+                venue = left
                 break
+            elif venue_fallback == "Unknown":
+                venue_fallback = left
+    if venue == "Unknown":
+        venue = venue_fallback
 
     match_key = f"{home_team} vs {away_team} - {venue} - {date_str}"
 

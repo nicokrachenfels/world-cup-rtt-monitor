@@ -31,6 +31,9 @@ class TeamStatus(TypedDict):
     clinched_first: bool
     clinched_second: bool   # locked into 2nd-place slot specifically
     clinched_advance: bool
+    espn_advanced: bool     # ESPN's authoritative advancement flag (accounts for tiebreakers)
+    espn_note: str          # ESPN's status description
+    espn_rank: int          # ESPN's ranked position in group (1-4); used to confirm 1st vs 2nd
 
 
 def fetch_standings() -> dict[str, TeamStatus]:
@@ -88,6 +91,15 @@ def _parse_group_entries(entries: list, group_name: str) -> list[TeamStatus]:
         goals_for = int(stats_map.get("pointsfor", stats_map.get("gf", 0)))
         goals_against = int(stats_map.get("pointsagainst", stats_map.get("ga", 0)))
 
+        # ESPN's authoritative advancement flag — accounts for head-to-head tiebreakers.
+        # advanced=1.0 means truly locked in; 0.0 = projected but not yet confirmed.
+        # note.description "Advance to Round of 32" can appear for projected-but-unconfirmed
+        # teams too, so we rely ONLY on the numeric advanced stat, not the description.
+        espn_advanced = bool(stats_map.get("advanced", 0))
+        note_obj = entry.get("note", {}) or {}
+        espn_note = note_obj.get("description", "")
+        espn_rank = int(note_obj.get("rank", 0))
+
         teams.append({
             "team": team_name,
             "group": group_name,
@@ -103,6 +115,9 @@ def _parse_group_entries(entries: list, group_name: str) -> list[TeamStatus]:
             "clinched_first": False,
             "clinched_second": False,
             "clinched_advance": False,
+            "espn_advanced": espn_advanced,
+            "espn_note": espn_note,
+            "espn_rank": espn_rank,
         })
 
     return teams
@@ -127,24 +142,21 @@ def _apply_status_flags(group_teams: list[TeamStatus]) -> None:
         remaining = total_games - team["played"]
         max_possible_points = team["points"] + remaining * POINTS_PER_WIN
 
-        # Determine rank 1 and rank 2 min points needed to reach them
-        # A team in position i can be displaced by those below if they catch up
-        # Simplified: if max possible points < the 2nd-place team's current points → eliminated
         if len(ranked) >= 2:
             second_place_points = ranked[1]["points"] if i >= 2 else 0
-            first_place_points = ranked[0]["points"] if i >= 1 else 0
         else:
             second_place_points = 0
-            first_place_points = 0
 
-        # Eliminated: can't mathematically reach top 2 spots
-        # Rough check: if max possible points can't tie current 2nd place
-        if i >= TEAMS_ADVANCING_PER_GROUP and max_possible_points < second_place_points:
+        # Eliminated: ESPN note is authoritative; fall back to points math
+        if "eliminated" in team["espn_note"].lower():
+            team["eliminated"] = True
+        elif i >= TEAMS_ADVANCING_PER_GROUP and max_possible_points < second_place_points:
             team["eliminated"] = True
 
-        # Clinched advance: even with 0 points remaining, stays top 2
-        if i < TEAMS_ADVANCING_PER_GROUP:
-            # Check if the 3rd-place team can possibly catch up
+        # Clinched advance: ESPN's flag accounts for head-to-head tiebreakers
+        if team["espn_advanced"]:
+            team["clinched_advance"] = True
+        elif i < TEAMS_ADVANCING_PER_GROUP:
             third_team = ranked[2] if len(ranked) > 2 else None
             if third_team:
                 third_remaining = total_games - third_team["played"]
@@ -152,27 +164,30 @@ def _apply_status_flags(group_teams: list[TeamStatus]) -> None:
                 if third_max < team["points"]:
                     team["clinched_advance"] = True
 
-        # Clinched 1st: even with 0 points remaining, 2nd place can't overtake
+        # Clinched 1st: ESPN advanced=1.0 AND ESPN's own rank=1.
+        # ESPN computes head-to-head tiebreakers in their rank, so espn_rank=1 + advanced=1.0
+        # means they've secured 1st accounting for all tiebreakers.
+        # Fall back to points math (no tie possible) if ESPN data is absent.
         if i == 0:
-            second_team = ranked[1] if len(ranked) > 1 else None
-            if second_team:
-                second_remaining = total_games - second_team["played"]
-                second_max = second_team["points"] + second_remaining * POINTS_PER_WIN
-                if second_max < team["points"]:
+            if team["espn_advanced"] and team["espn_rank"] == 1:
+                team["clinched_first"] = True
+            else:
+                second_team = ranked[1] if len(ranked) > 1 else None
+                if not second_team:
                     team["clinched_first"] = True
+                else:
+                    second_remaining = total_games - second_team["played"]
+                    second_max = second_team["points"] + second_remaining * POINTS_PER_WIN
+                    if second_max < team["points"]:
+                        team["clinched_first"] = True
 
-        # Clinched 2nd: secured advance AND 1st-place team has already clinched 1st
-        # (meaning 2nd can't reach 1st, so the exact slot is locked)
+        # Clinched 2nd: ESPN advanced=1.0 AND ESPN's rank=2 (their position is also locked),
+        # which requires rank-1 to also be clinched (otherwise rank could still swap).
         if i == 1:
-            first_team = ranked[0] if len(ranked) > 0 else None
-            third_team = ranked[2] if len(ranked) > 2 else None
-            advance_secured = True
-            if third_team:
-                third_remaining = total_games - third_team["played"]
-                third_max = third_team["points"] + third_remaining * POINTS_PER_WIN
-                advance_secured = third_max < team["points"]
-            if advance_secured and first_team and first_team.get("clinched_first"):
-                team["clinched_second"] = True
+            if team["espn_advanced"] and team["espn_rank"] == 2:
+                first_team = ranked[0] if len(ranked) > 0 else None
+                if first_team and first_team.get("clinched_first"):
+                    team["clinched_second"] = True
 
 
 def is_deadwood_match(

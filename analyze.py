@@ -72,6 +72,9 @@ def _team_label(
     """
     if not name or name == "TBD":
         return name
+    # Bracket references (e.g. "W74", "L85", "RU101") are not team projections
+    if _re.match(r'^[WLR][UL]?\d+$', name.strip()):
+        return name
 
     s = statuses.get(name.lower(), {})
     m = _GROUP_CODE_RE.match(raw_code.strip()) if raw_code else None
@@ -246,7 +249,7 @@ async def build_rows() -> list[dict]:
                 h_str = _fmt_team(h_bbc, _h_code)
                 a_str = _fmt_team(a_bbc, _a_code)
                 teams_str = f"{h_str} vs {a_str}"
-                match_label = f"{round_label} ({teams_str})" if round_label else teams_str
+                match_label = f"{round_label}: {teams_str}" if round_label else teams_str
             else:
                 # 2. TicketData known teams (both sides resolved)
                 td_teams = find_td_teams(venue_code, td) if venue_code else None
@@ -261,7 +264,7 @@ async def build_rows() -> list[dict]:
                         h_str = _fmt_team(h.strip("() "), h)
                         a_str = _fmt_team(a.strip("() "), a)
                     teams_str = f"{h_str} vs {a_str}"
-                    match_label = f"{round_label} ({teams_str})" if round_label else teams_str
+                    match_label = f"{round_label}: {teams_str}" if round_label else teams_str
                 else:
                     # 3. Partial resolution from TicketData when one side is known
                     if _td_m and (_h_code != "TBD" or _a_code != "TBD"):
@@ -272,9 +275,9 @@ async def build_rows() -> list[dict]:
                         h_str = _fmt_team(h_name, _h_code) if h_name else "TBD"
                         a_str = _fmt_team(a_name, _a_code) if a_name else "TBD"
                         teams_str = f"{h_str} vs {a_str}"
-                        match_label = f"{round_label} ({teams_str})" if round_label else teams_str
+                        match_label = f"{round_label}: {teams_str}" if round_label else teams_str
                     else:
-                        match_label = f"{round_label} ({venue_code})" if (round_label and venue_code) else (round_label or venue_code or "TBD")
+                        match_label = f"{round_label}: {venue_code}" if (round_label and venue_code) else (round_label or venue_code or "TBD")
             subtitle = f"{date_part} · {location}" if location else date_part
         else:
             match_label = f"{v['home_team']} vs {v['away_team']}"

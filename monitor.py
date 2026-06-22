@@ -19,7 +19,7 @@ import re
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
 from scraper.ticketdata import scrape_all_matches, find_get_in_price
-from scraper.standings import fetch_standings, is_deadwood_match
+from scraper.standings import fetch_standings, is_deadwood_match, get_group_rankings
 from alerts.email import send_alert
 
 logging.basicConfig(
@@ -60,6 +60,18 @@ def compute_profit(rtt_price: float, get_in_price: float, cfg: dict) -> tuple[fl
     return seller_net, margin
 
 
+_GROUP_CODE_RE_MON = re.compile(r'^(\d)([A-Z])$')
+
+
+def _resolve_group_code(code: str, rankings: dict) -> str:
+    m = _GROUP_CODE_RE_MON.match(code.strip()) if code else None
+    if not m:
+        return code
+    pos, group = int(m.group(1)), m.group(2)
+    teams = rankings.get(group, [])
+    return teams[pos - 1] if pos <= len(teams) else code
+
+
 def _round_name(match_code: str) -> str:
     try:
         n = int(match_code[1:])
@@ -75,7 +87,7 @@ def _round_name(match_code: str) -> str:
     return "Knockout"
 
 
-def _build_match_label(listing: dict, td_matches: dict) -> str:
+def _build_match_label(listing: dict, td_matches: dict, rankings: dict | None = None) -> str:
     """
     Build a human-readable match label for use in email alerts.
     Falls back gracefully from full team names → round+code → generic.
@@ -94,12 +106,14 @@ def _build_match_label(listing: dict, td_matches: dict) -> str:
         if td_m:
             td_home = td_m.get("home_team", "TBD")
             td_away = td_m.get("away_team", "TBD")
+            if rankings:
+                td_home = _resolve_group_code(td_home, rankings)
+                td_away = _resolve_group_code(td_away, rankings)
             round_label = _round_name(venue)
-            if td_home != "TBD" and td_away != "TBD":
-                suffix = f" ({td_home} vs {td_away})" if round_label else f"{td_home} vs {td_away}"
-                return f"{round_label}{suffix}" if round_label else suffix
+            if td_home not in ("TBD", "") and td_away not in ("TBD", ""):
+                return f"{round_label}: {td_home} vs {td_away}" if round_label else f"{td_home} vs {td_away}"
         round_label = _round_name(venue)
-        return f"{round_label} ({venue})" if round_label else venue
+        return f"{round_label}: {venue}" if round_label else venue
 
     # Try city + date lookup in td_matches
     if venue and venue != "Unknown" and date and date != "Unknown":
@@ -116,17 +130,20 @@ def _build_match_label(listing: dict, td_matches: dict) -> str:
                         round_label = _round_name(mc) if mc else ""
                         td_home = td_m.get("home_team", "TBD")
                         td_away = td_m.get("away_team", "TBD")
-                        if td_home != "TBD" and td_away != "TBD":
-                            return f"{round_label} ({td_home} vs {td_away})" if round_label else f"{td_home} vs {td_away}"
+                        if rankings:
+                            td_home = _resolve_group_code(td_home, rankings)
+                            td_away = _resolve_group_code(td_away, rankings)
+                        if td_home not in ("TBD", "") and td_away not in ("TBD", ""):
+                            return f"{round_label}: {td_home} vs {td_away}" if round_label else f"{td_home} vs {td_away}"
                         elif mc:
-                            return f"{round_label} ({mc})" if round_label else mc
+                            return f"{round_label}: {mc}" if round_label else mc
         except Exception:
             pass
 
     # Last resort: use whatever venue info we have
     if venue and venue != "Unknown":
         round_label = _round_name(venue) if re.match(r'^M\d+$', venue) else ""
-        return f"{round_label} ({venue})" if round_label else f"Match at {venue}"
+        return f"{round_label}: {venue}" if round_label else f"Match at {venue}"
     if date and date != "Unknown":
         return f"Knockout Match ({date})"
     return listing.get("match_key", "Knockout Match")
@@ -177,6 +194,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         logger.info(f"Clinched 1st: {clinched}")
     else:
         logger.warning("Could not fetch standings — proceeding without team filtering")
+    rankings = get_group_rankings(statuses) if statuses else {}
 
     # ── 2. Scrape FIFA RTT page ───────────────────────────────────────────
     logger.info("Scraping FIFA RTT marketplace...")
@@ -236,7 +254,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             logger.debug(f"No get-in price for {listing['match_key']} — skipping profit calc")
             if is_brand_new:
                 new_listings.append({
-                    "match_key": _build_match_label(listing, td_matches),
+                    "match_key": _build_match_label(listing, td_matches, rankings),
                     "category": listing["category"],
                     "rtt_price": rtt_price,
                     "get_in_price": None,
@@ -249,7 +267,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         deadwood = is_deadwood_match(listing["home_team"], listing["away_team"], statuses)
 
         result = {
-            "match_key": _build_match_label(listing, td_matches),
+            "match_key": _build_match_label(listing, td_matches, rankings),
             "_raw_match_key": listing["match_key"],
             "home_team": listing["home_team"],
             "away_team": listing["away_team"],
@@ -285,7 +303,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         elif is_brand_new:
             # New listing that isn't profitable yet — track supply movement
             new_listings.append({
-                "match_key": _build_match_label(listing, td_matches),
+                "match_key": _build_match_label(listing, td_matches, rankings),
                 "category": listing["category"],
                 "rtt_price": rtt_price,
                 "get_in_price": get_in,
@@ -302,7 +320,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "get_in_price": get_in,
             "margin": margin,
             "match_key": listing["match_key"],
-            "match_label": _build_match_label(listing, td_matches),
+            "match_label": _build_match_label(listing, td_matches, rankings),
             "category": listing["category"],
         }
 
