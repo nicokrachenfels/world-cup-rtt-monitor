@@ -2,8 +2,8 @@ name: RTT Arbitrage Monitor
 
 on:
   schedule:
-    # Every 15 minutes (requires public repo for unlimited free minutes)
-    - cron: '*/15 * * * *'
+    # Every 5 minutes (GitHub Actions minimum)
+    - cron: '*/5 * * * *'
   workflow_dispatch:  # Allow manual trigger for testing
 
 jobs:

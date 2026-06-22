@@ -51,6 +51,11 @@ def send_alert(
     except urllib.error.HTTPError as e:
         body = e.read().decode()
         logger.error(f"SendGrid error {e.code}: {body}")
+        if e.code == 403:
+            logger.error(
+                "Fix: verify ALERT_FROM_EMAIL matches a Single Sender at "
+                "https://app.sendgrid.com/settings/sender_auth/senders"
+            )
         raise
 
 
@@ -70,7 +75,6 @@ def _build_subject(triggered: list[dict]) -> str:
 
 def _build_html_body(triggered: list[dict], all_profitable: list[dict]) -> str:
     rows_triggered = _render_table_rows(triggered)
-    rows_all = _render_table_rows(all_profitable)
 
     return f"""
 <!DOCTYPE html>
@@ -78,15 +82,11 @@ def _build_html_body(triggered: list[dict], all_profitable: list[dict]) -> str:
 <body style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
   <h2 style="color: #1a73e8;">New RTT Arbitrage Opportunity</h2>
 
-  <h3>Triggered Alert(s)</h3>
   {_html_table(rows_triggered)}
-
-  <h3 style="margin-top:24px;">All Currently Profitable Matches</h3>
-  {_html_table(rows_all)}
 
   <p style="color:#888; font-size:12px; margin-top:24px;">
     Profit = (get-in &divide; 1.20 &times; 0.90 &minus; RTT price) &divide; RTT price &nbsp;|&nbsp;
-    Threshold: 10% &nbsp;|&nbsp;
+    Threshold: 5% or +$300 &nbsp;|&nbsp;
     <a href="https://collect.fifa.com/right-to-ticket">FIFA RTT Marketplace</a>
   </p>
 </body>
@@ -134,22 +134,12 @@ def _render_table_rows(listings: list[dict]) -> str:
 def _build_text_body(triggered: list[dict], all_profitable: list[dict]) -> str:
     lines = ["=== NEW RTT ARBITRAGE ALERT ===\n"]
 
-    lines.append("TRIGGERED:")
     for t in sorted(triggered, key=lambda x: -x["profit_margin"]):
         lines.append(
             f"  {t['match_key']} | Cat {t.get('category','?')} | "
             f"RTT ${t['rtt_price']:,.0f} | Get-in ${t['get_in_price']:,.0f} | "
             f"Seller net ${t['seller_net']:,.0f} | Profit {t['profit_margin']:.1%}"
         )
-
-    if all_profitable:
-        lines.append("\nALL PROFITABLE MATCHES:")
-        for t in sorted(all_profitable, key=lambda x: -x["profit_margin"]):
-            lines.append(
-                f"  {t['match_key']} | Cat {t.get('category','?')} | "
-                f"RTT ${t['rtt_price']:,.0f} | Get-in ${t['get_in_price']:,.0f} | "
-                f"Profit {t['profit_margin']:.1%}"
-            )
 
     lines.append("\nFormula: profit = (get-in / 1.20 * 0.90 - RTT price) / RTT price")
     lines.append("FIFA RTT: https://collect.fifa.com/right-to-ticket")
