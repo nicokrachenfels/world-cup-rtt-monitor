@@ -175,13 +175,13 @@ async def run(dry_run: bool = False, force_alert: bool = False) -> None:
         logger.info("DRY RUN — no email sent")
         _print_summary(all_profitable, triggered)
     elif triggered or force_alert:
-        gmail_user = _get_env("GMAIL_USER")
-        gmail_pass = _get_env("GMAIL_APP_PASSWORD")
+        sendgrid_key = _get_env("SENDGRID_API_KEY")
+        from_email = _get_env("ALERT_FROM_EMAIL")
         to_email = cfg.get("alert_email") or _get_env("ALERT_EMAIL")
 
         send_alert(
-            gmail_user=gmail_user,
-            gmail_app_password=gmail_pass,
+            sendgrid_api_key=sendgrid_key,
+            from_email=from_email,
             to_email=to_email,
             triggered_listings=triggered,
             all_profitable_listings=all_profitable,

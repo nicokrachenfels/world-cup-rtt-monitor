@@ -1,30 +1,23 @@
 """
-Send RTT arbitrage alerts via Gmail SMTP.
+Send RTT arbitrage alerts via SendGrid.
 """
 import logging
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+import urllib.request
+import urllib.error
+import json
 
 logger = logging.getLogger(__name__)
 
-GMAIL_SMTP_HOST = "smtp.gmail.com"
-GMAIL_SMTP_PORT = 587
+SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 
 
 def send_alert(
-    gmail_user: str,
-    gmail_app_password: str,
+    sendgrid_api_key: str,
+    from_email: str,
     to_email: str,
     triggered_listings: list[dict],
     all_profitable_listings: list[dict],
 ) -> None:
-    """
-    Send an email alert for new profitable RTT listings.
-
-    triggered_listings: the specific new/lower-priced listings that fired the alert
-    all_profitable_listings: all currently profitable listings (for context)
-    """
     if not triggered_listings:
         return
 
@@ -32,22 +25,32 @@ def send_alert(
     html_body = _build_html_body(triggered_listings, all_profitable_listings)
     text_body = _build_text_body(triggered_listings, all_profitable_listings)
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = gmail_user
-    msg["To"] = to_email
-    msg.attach(MIMEText(text_body, "plain"))
-    msg.attach(MIMEText(html_body, "html"))
+    payload = json.dumps({
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {"email": from_email},
+        "subject": subject,
+        "content": [
+            {"type": "text/plain", "value": text_body},
+            {"type": "text/html", "value": html_body},
+        ],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        SENDGRID_API_URL,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {sendgrid_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
 
     try:
-        with smtplib.SMTP(GMAIL_SMTP_HOST, GMAIL_SMTP_PORT) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(gmail_user, gmail_app_password)
-            server.sendmail(gmail_user, to_email, msg.as_string())
-        logger.info(f"Alert sent to {to_email}: {subject}")
-    except smtplib.SMTPException as e:
-        logger.error(f"Failed to send email alert: {e}", exc_info=True)
+        with urllib.request.urlopen(req) as resp:
+            logger.info(f"Alert sent to {to_email} (status {resp.status}): {subject}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        logger.error(f"SendGrid error {e.code}: {body}")
         raise
 
 
@@ -82,7 +85,7 @@ def _build_html_body(triggered: list[dict], all_profitable: list[dict]) -> str:
   {_html_table(rows_all)}
 
   <p style="color:#888; font-size:12px; margin-top:24px;">
-    Profit = (get-in ÷ 1.20 × 0.90 − RTT price) ÷ RTT price &nbsp;|&nbsp;
+    Profit = (get-in &divide; 1.20 &times; 0.90 &minus; RTT price) &divide; RTT price &nbsp;|&nbsp;
     Threshold: 10% &nbsp;|&nbsp;
     <a href="https://collect.fifa.com/right-to-ticket">FIFA RTT Marketplace</a>
   </p>

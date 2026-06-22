@@ -42,8 +42,8 @@ jobs:
 
       - name: Run RTT monitor
         env:
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          ALERT_FROM_EMAIL: ${{ secrets.ALERT_FROM_EMAIL }}
           ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
           FIFA_EMAIL: ${{ secrets.FIFA_EMAIL }}
           FIFA_PASSWORD: ${{ secrets.FIFA_PASSWORD }}
