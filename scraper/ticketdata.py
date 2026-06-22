@@ -15,6 +15,7 @@ TICKETDATA_API_URL = "https://data.ticketdata.com/api/search?performer_slug=worl
 
 _TEAM_ALIASES: dict[str, str] = {
     "united states": "usa",
+    "united states of america": "usa",
     "u.s.a.": "usa",
     "u.s.": "usa",
     "türkiye": "turkey",

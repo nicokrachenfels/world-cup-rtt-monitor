@@ -161,7 +161,9 @@ def _extract_listings_js() -> str:
 def _parse_raw_listing(raw: dict) -> Optional[RTTListing]:
     """
     Parse a raw DOM extraction into an RTTListing.
-    This is deliberately lenient — the FIFA page DOM changes often.
+
+    Actual card format (newline-separated):
+        25\nJUN\n🇪🇨\nEcuador\nvs.\n🇩🇪\nGermany\nM56 · Group Stage\nNew York/New Jersey · ...\nCAT 1\nBUY NOW FOR\nUS$1,299.00\n...
     """
     import re
 
@@ -169,67 +171,76 @@ def _parse_raw_listing(raw: dict) -> Optional[RTTListing]:
     if not text:
         return None
 
-    # Extract price — look for patterns like "$1,234", "1234 USD", "€999"
-    price_match = re.search(r"[\$€£][\s]?([\d,]+(?:\.\d{2})?)", text)
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+
+    # ── Price ────────────────────────────────────────────────────────────────
+    # Format: "US$1,299.00" or "$600.00"
+    price_match = re.search(r"US?\$([\d,]+(?:\.\d{2})?)", text)
     if not price_match:
-        price_match = re.search(r"([\d,]+(?:\.\d{2})?)\s*(?:USD|EUR|GBP)", text)
+        price_match = re.search(r"([\d,]+(?:\.\d{2})?)\s*USD", text)
     if not price_match:
         return None
-
     try:
         price = float(price_match.group(1).replace(",", ""))
     except ValueError:
         return None
 
     currency = "USD"
-    if "€" in text:
-        currency = "EUR"
-    elif "£" in text:
-        currency = "GBP"
 
-    # Extract category — FIFA page uses "CAT 1", "CAT 2", "CAT 3" or "Category 1" etc.
+    # ── Category ─────────────────────────────────────────────────────────────
     cat_match = re.search(r"\bCAT\s*([123])\b|\b[Cc]ategor(?:y|ia)[:\s]*([123])\b", text)
-    if cat_match:
-        category = cat_match.group(1) or cat_match.group(2)
-    else:
-        category = "Unknown"
+    category = (cat_match.group(1) or cat_match.group(2)) if cat_match else "Unknown"
 
-    # Try to extract team names — look for "vs" or "v." patterns
-    vs_match = re.search(r"([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)\s+(?:vs?\.?|–|-)\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)", text)
-    home_team = vs_match.group(1) if vs_match else "TBD"
-    away_team = vs_match.group(2) if vs_match else "TBD"
+    # ── Team names ───────────────────────────────────────────────────────────
+    # Card has: ...\n{Team1}\nvs.\n{Team2}\n...
+    # Use the "vs." line as an anchor — teams are the non-emoji, non-date lines around it
+    home_team = "TBD"
+    away_team = "TBD"
 
-    # Date — look for date-like strings
-    date_match = re.search(
-        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,?\s+\d{4})?",
-        text,
-        re.IGNORECASE,
-    )
-    match_date = date_match.group(0) if date_match else "Unknown"
+    # Strip emoji/flag characters for matching
+    def _is_team_line(line: str) -> bool:
+        clean = re.sub(r'[^\x00-\x7F]', '', line).strip()  # remove non-ASCII (flags)
+        return bool(clean) and not re.match(r'^\d', clean) and clean not in ('vs.', 'vs', 'v')
 
-    # Venue — any non-price, non-date, non-team line that looks like a place name
-    venue_match = re.search(r"(?:at|@|venue|stadium)[:\s]+([A-Z][^\n,]+)", text, re.IGNORECASE)
-    if venue_match:
-        venue = venue_match.group(1).strip()
-    else:
-        # Fallback: grab lines that look like city/stadium names (title-cased, no $)
-        venue_lines = [
-            l.strip() for l in text.splitlines()
-            if l.strip() and "$" not in l and "CAT" not in l.upper()
-            and not re.search(r"\d{1,2}[/\-]\d{1,2}", l)
-            and 4 < len(l.strip()) < 50
-            and l.strip()[0].isupper()
-        ]
-        venue = venue_lines[0] if venue_lines else "Unknown"
+    for i, line in enumerate(lines):
+        if line.lower() in ("vs.", "vs", "v."):
+            # Search backwards for home team (skip flags/dates)
+            for j in range(i - 1, max(i - 4, -1), -1):
+                if _is_team_line(lines[j]):
+                    home_team = re.sub(r'[^\x00-\x7F]', '', lines[j]).strip()
+                    break
+            # Search forwards for away team
+            for j in range(i + 1, min(i + 4, len(lines))):
+                if _is_team_line(lines[j]):
+                    away_team = re.sub(r'[^\x00-\x7F]', '', lines[j]).strip()
+                    break
+            break
 
-    match_key = f"{home_team} vs {away_team} - {venue} - {match_date}"
+    # ── Date ─────────────────────────────────────────────────────────────────
+    # Card starts with day number + month abbreviation on separate lines e.g. "25\nJUN"
+    date_str = "Unknown"
+    month_abbrs = ("JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC")
+    for i, line in enumerate(lines):
+        if line.upper() in month_abbrs and i > 0 and lines[i - 1].isdigit():
+            date_str = f"{line.upper()} {lines[i - 1]}"
+            break
+
+    # ── Venue ────────────────────────────────────────────────────────────────
+    # Format: "City · Stadium Name"  e.g. "New York/New Jersey · New York New Jersey Stadium"
+    venue = "Unknown"
+    for line in lines:
+        if "·" in line and "$" not in line and "CAT" not in line.upper():
+            venue = line.split("·")[0].strip()
+            break
+
+    match_key = f"{home_team} vs {away_team} - {venue} - {date_str}"
 
     return RTTListing(
         match_key=match_key,
         home_team=home_team,
         away_team=away_team,
         venue=venue,
-        match_date=match_date,
+        match_date=date_str,
         category=category,
         price=price,
         currency=currency,
