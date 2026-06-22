@@ -126,7 +126,12 @@ async def build_rows() -> list[dict]:
                     proj_suffix = ""
                 match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
             else:
-                match_label = round_label or venue_code or "TBD"
+                if round_label and venue_code:
+                    match_label = f"{round_label} ({venue_code})"
+                elif round_label:
+                    match_label = round_label
+                else:
+                    match_label = venue_code or "TBD"
             subtitle = f"{date_part} · {location}" if location else date_part
         else:
             match_label = f"{v['home_team']} vs {v['away_team']}"
@@ -224,30 +229,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   header .meta {{ font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 16px; }}
   header .meta .dot {{ width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }}
   @keyframes pulse {{ 0%,100% {{ opacity: 1 }} 50% {{ opacity: .4 }} }}
-
-  /* ── Summary cards ── */
-  .summary {{
-    display: flex;
-    gap: 12px;
-    padding: 16px 28px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    overflow-x: auto;
-  }}
-  .card {{
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px 18px;
-    min-width: 120px;
-    flex-shrink: 0;
-  }}
-  .card .label {{ font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin-bottom: 4px; }}
-  .card .value {{ font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }}
-  .card.green .value {{ color: var(--green); }}
-  .card.amber .value {{ color: var(--amber); }}
-  .card.blue .value {{ color: var(--blue); }}
-  .card.purple .value {{ color: var(--purple); }}
 
   /* ── Controls ── */
   .controls {{
@@ -386,12 +367,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   .cat-2 {{ background: rgba(96,165,250,.12); color: var(--blue); }}
   .cat-3 {{ background: rgba(100,116,139,.15); color: #94a3b8; }}
 
-  /* ── Badges ── */
-  .badge {{ display: inline-block; padding: 2px 7px; border-radius: 5px; font-size: 10px; font-weight: 700; letter-spacing: .04em; }}
-  .badge-alert {{ background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.25); }}
-  .badge-dead {{ background: rgba(239,68,68,.12); color: var(--red); border: 1px solid rgba(239,68,68,.2); }}
-  .badge-tbd {{ background: rgba(96,165,250,.12); color: var(--blue); border: 1px solid rgba(96,165,250,.2); }}
-
   /* ── No results ── */
   #no-results {{
     display: none;
@@ -437,13 +412,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
   </div>
 </header>
 
-<div class="summary" id="summaryCards">
-  <div class="card green"><div class="label">Alerts</div><div class="value" id="cAlerts">—</div></div>
-  <div class="card amber"><div class="label">Profit+</div><div class="value" id="cProfit">—</div></div>
-  <div class="card blue"><div class="label">Showing</div><div class="value" id="cRows">—</div></div>
-  <div class="card purple"><div class="label">Best margin</div><div class="value" id="cBest">—</div></div>
-</div>
-
 <div class="controls">
   <div class="filter-group">
     <label>Cat</label>
@@ -474,11 +442,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
     <div class="pip"></div>
     Alerts only (≥{int(MARGIN_THRESHOLD*100)}% or +${DOLLAR_THRESHOLD})
   </label>
-  <label class="toggle">
-    <input type="checkbox" id="filterHideDead">
-    <div class="pip"></div>
-    Hide deadwood
-  </label>
 </div>
 
 <div class="table-wrap">
@@ -494,7 +457,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
         <th data-col="used" class="num">Cat-adj. get-in</th>
         <th data-col="fees" class="num">Fees $</th>
         <th data-col="td_floor" class="num">Floor price</th>
-        <th>Flags</th>
       </tr>
     </thead>
     <tbody id="tableBody"></tbody>
@@ -538,7 +500,6 @@ function renderTable() {{
   const date = document.getElementById("filterDate").value;
   const teams = document.getElementById("filterTeams").value;
   const alertsOnly = document.getElementById("filterAlerts").checked;
-  const hideDead = document.getElementById("filterHideDead").checked;
 
   let rows = RAW.filter(r => {{
     if (cat && r.cat !== cat) return false;
@@ -546,7 +507,6 @@ function renderTable() {{
     if (teams === "confirmed" && r.tbd) return false;
     if (teams === "tbd" && !r.tbd) return false;
     if (alertsOnly && !r.alert) return false;
-    if (hideDead && r.dead) return false;
     return true;
   }});
 
@@ -555,14 +515,6 @@ function renderTable() {{
     if (typeof av === "string") av = av.toLowerCase(), bv = bv.toLowerCase();
     return sortDir * (av < bv ? -1 : av > bv ? 1 : 0);
   }});
-
-  const alerts = rows.filter(r => r.alert).length;
-  const positive = rows.filter(r => r.profit > 0).length;
-  const best = rows.filter(r => r.margin > 0)[0];
-  document.getElementById("cAlerts").textContent = alerts;
-  document.getElementById("cProfit").textContent = positive;
-  document.getElementById("cRows").textContent = rows.length;
-  document.getElementById("cBest").textContent = best ? (best.margin*100).toFixed(1)+"%" : "—";
 
   const tbody = document.getElementById("tableBody");
   tbody.innerHTML = "";
@@ -583,11 +535,6 @@ function renderTable() {{
     const rowClass = r.alert ? "alert-row" : r.dead ? "dead-row" : "";
     const catClass = `cat-${{r.cat}}`;
 
-    const flags = [];
-    if (r.alert) flags.push('<span class="badge badge-alert">ALERT</span>');
-    if (r.dead) flags.push('<span class="badge badge-dead">DEAD</span>');
-    if (r.tbd) flags.push('<span class="badge badge-tbd">TBD</span>');
-
     const sub = r.subtitle || fmtDate(r.date);
 
     tbody.innerHTML += `<tr class="${{rowClass}}">
@@ -603,7 +550,6 @@ function renderTable() {{
       <td class="num dim">$${{fmt(r.used)}}</td>
       <td class="num very-dim">$${{fmt(r.fees)}}</td>
       <td class="num very-dim">$${{fmt(r.td_floor)}}</td>
-      <td>${{flags.join(" ")}}</td>
     </tr>`;
   }});
 }}
@@ -621,8 +567,7 @@ document.querySelectorAll("th[data-col]").forEach(th => {{
 
 ["filterCat","filterDate","filterTeams"].forEach(id =>
   document.getElementById(id).addEventListener("change", renderTable));
-["filterAlerts","filterHideDead"].forEach(id =>
-  document.getElementById(id).addEventListener("change", renderTable));
+document.getElementById("filterAlerts").addEventListener("change", renderTable);
 
 document.querySelector('th[data-col="margin"]').classList.add("sorted-desc");
 renderTable();
