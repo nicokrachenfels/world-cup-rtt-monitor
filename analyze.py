@@ -57,6 +57,45 @@ def seller_net(get_in: float) -> float:
     return get_in / (1 + BUYER_FEE) * (1 - SELLER_FEE)
 
 
+def _team_label(
+    name: str,
+    raw_code: str,
+    statuses: dict,
+    rankings: dict,
+) -> str:
+    """
+    Return "Name (lock)" or "Name (proj.)" based on whether the team's
+    R32 slot is mathematically secured.
+
+    raw_code: the original TicketData token for this side — e.g. "1B", "2F",
+              "Germany", or "TBD" (wildcard resolved via BBC).
+    """
+    if not name or name == "TBD":
+        return name
+
+    s = statuses.get(name.lower(), {})
+    m = _GROUP_CODE_RE.match(raw_code.strip()) if raw_code else None
+
+    if m:
+        pos, group = int(m.group(1)), m.group(2)
+        if pos == 1 and s.get("clinched_first"):
+            return f"{name} (lock)"
+        if pos == 2 and s.get("clinched_second"):
+            return f"{name} (lock)"
+        return f"{name} (proj.)"
+
+    # Direct team name already known (not a group code)
+    if raw_code and raw_code != "TBD":
+        if s.get("clinched_first"):
+            return f"{name} (lock)"
+        if s.get("clinched_second"):
+            return f"{name} (lock)"
+        return f"{name} (proj.)"
+
+    # raw_code == "TBD" means this slot came from BBC (wildcard 3rd-place)
+    return f"{name} (proj.)"
+
+
 def _round_name(match_code: str) -> str:
     try:
         n = int(match_code[1:])
@@ -190,12 +229,24 @@ async def build_rows() -> list[dict]:
             else:
                 location = ""
 
+            # Pull raw TicketData codes for this slot (needed for lock/proj. tagging)
+            _h_code = _td_m.get("home_team", "TBD").strip("() ") if _td_m else "TBD"
+            _a_code = _td_m.get("away_team", "TBD").strip("() ") if _td_m else "TBD"
+            if _re.match(r'^World Cup Match\b', _h_code, _re.I): _h_code = "TBD"
+            if _re.match(r'^World Cup Match\b', _a_code, _re.I): _a_code = "TBD"
+
+            def _fmt_team(name: str, raw: str) -> str:
+                """Format one team name with (lock)/(proj.) suffix."""
+                return _team_label(name, raw, statuses, rankings)
+
             # 1. BBC bracket projection (covers wildcard 3rd-place slots)
             bbc_teams = bbc_proj.get(venue_code)
             if bbc_teams:
                 h_bbc, a_bbc = bbc_teams
-                teams_str = f"{h_bbc} vs {a_bbc}"
-                match_label = f"{round_label} ({teams_str}) (projected)" if round_label else teams_str
+                h_str = _fmt_team(h_bbc, _h_code)
+                a_str = _fmt_team(a_bbc, _a_code)
+                teams_str = f"{h_str} vs {a_str}"
+                match_label = f"{round_label} ({teams_str})" if round_label else teams_str
             else:
                 # 2. TicketData known teams (both sides resolved)
                 td_teams = find_td_teams(venue_code, td) if venue_code else None
@@ -204,29 +255,24 @@ async def build_rows() -> list[dict]:
                     h_proj = _resolve_group_code(h, rankings)
                     a_proj = _resolve_group_code(a, rankings)
                     if h_proj and a_proj:
-                        teams_str = f"{h_proj} vs {a_proj}"
-                        proj_suffix = " (projected)"
+                        h_str = _fmt_team(h_proj, h)
+                        a_str = _fmt_team(a_proj, a)
                     else:
-                        teams_str = f"{h.strip('() ')} vs {a.strip('() ')}"
-                        proj_suffix = ""
-                    match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
+                        h_str = _fmt_team(h.strip("() "), h)
+                        a_str = _fmt_team(a.strip("() "), a)
+                    teams_str = f"{h_str} vs {a_str}"
+                    match_label = f"{round_label} ({teams_str})" if round_label else teams_str
                 else:
                     # 3. Partial resolution from TicketData when one side is known
-                    if _td_m:
-                        h_raw = _td_m.get("home_team", "TBD").strip("() ")
-                        a_raw = _td_m.get("away_team", "TBD").strip("() ")
-                        if _re.match(r'^World Cup Match\b', h_raw, _re.I): h_raw = "TBD"
-                        if _re.match(r'^World Cup Match\b', a_raw, _re.I): a_raw = "TBD"
-                        if h_raw != "TBD" or a_raw != "TBD":
-                            h_proj = _resolve_group_code(h_raw, rankings) if h_raw != "TBD" else None
-                            a_proj = _resolve_group_code(a_raw, rankings) if a_raw != "TBD" else None
-                            h_str = h_proj or h_raw
-                            a_str = a_proj or a_raw
-                            proj_suffix = " (projected)" if (h_proj or a_proj) else ""
-                            teams_str = f"{h_str} vs {a_str}"
-                            match_label = f"{round_label} ({teams_str}){proj_suffix}" if round_label else teams_str
-                        else:
-                            match_label = f"{round_label} ({venue_code})" if (round_label and venue_code) else (round_label or venue_code or "TBD")
+                    if _td_m and (_h_code != "TBD" or _a_code != "TBD"):
+                        h_resolved = _resolve_group_code(_h_code, rankings) if _h_code != "TBD" else None
+                        a_resolved = _resolve_group_code(_a_code, rankings) if _a_code != "TBD" else None
+                        h_name = h_resolved or (_h_code if _h_code != "TBD" else None)
+                        a_name = a_resolved or (_a_code if _a_code != "TBD" else None)
+                        h_str = _fmt_team(h_name, _h_code) if h_name else "TBD"
+                        a_str = _fmt_team(a_name, _a_code) if a_name else "TBD"
+                        teams_str = f"{h_str} vs {a_str}"
+                        match_label = f"{round_label} ({teams_str})" if round_label else teams_str
                     else:
                         match_label = f"{round_label} ({venue_code})" if (round_label and venue_code) else (round_label or venue_code or "TBD")
             subtitle = f"{date_part} · {location}" if location else date_part

@@ -29,6 +29,7 @@ class TeamStatus(TypedDict):
     goal_diff: int
     eliminated: bool
     clinched_first: bool
+    clinched_second: bool   # locked into 2nd-place slot specifically
     clinched_advance: bool
 
 
@@ -100,6 +101,7 @@ def _parse_group_entries(entries: list, group_name: str) -> list[TeamStatus]:
             "goal_diff": goals_for - goals_against,
             "eliminated": False,
             "clinched_first": False,
+            "clinched_second": False,
             "clinched_advance": False,
         })
 
@@ -158,6 +160,19 @@ def _apply_status_flags(group_teams: list[TeamStatus]) -> None:
                 second_max = second_team["points"] + second_remaining * POINTS_PER_WIN
                 if second_max < team["points"]:
                     team["clinched_first"] = True
+
+        # Clinched 2nd: secured advance AND 1st-place team has already clinched 1st
+        # (meaning 2nd can't reach 1st, so the exact slot is locked)
+        if i == 1:
+            first_team = ranked[0] if len(ranked) > 0 else None
+            third_team = ranked[2] if len(ranked) > 2 else None
+            advance_secured = True
+            if third_team:
+                third_remaining = total_games - third_team["played"]
+                third_max = third_team["points"] + third_remaining * POINTS_PER_WIN
+                advance_secured = third_max < team["points"]
+            if advance_secured and first_team and first_team.get("clinched_first"):
+                team["clinched_second"] = True
 
 
 def is_deadwood_match(
