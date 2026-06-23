@@ -110,8 +110,14 @@ def _build_match_label(listing: dict, td_matches: dict, rankings: dict | None = 
                 td_home = _resolve_group_code(td_home, rankings)
                 td_away = _resolve_group_code(td_away, rankings)
             round_label = _round_name(venue)
-            if td_home not in ("TBD", "") and td_away not in ("TBD", ""):
-                return f"{round_label}: {td_home} vs {td_away}" if round_label else f"{td_home} vs {td_away}"
+
+            def _is_real(name: str) -> bool:
+                return name not in ("TBD", "") and not re.match(r'^World Cup Match', name)
+
+            if _is_real(td_home) or _is_real(td_away):
+                h = td_home if _is_real(td_home) else "TBD"
+                a = td_away if _is_real(td_away) else "TBD"
+                return f"{round_label}: {h} vs {a}" if round_label else f"{h} vs {a}"
         round_label = _round_name(venue)
         return f"{round_label}: {venue}" if round_label else venue
 
@@ -133,8 +139,12 @@ def _build_match_label(listing: dict, td_matches: dict, rankings: dict | None = 
                         if rankings:
                             td_home = _resolve_group_code(td_home, rankings)
                             td_away = _resolve_group_code(td_away, rankings)
-                        if td_home not in ("TBD", "") and td_away not in ("TBD", ""):
-                            return f"{round_label}: {td_home} vs {td_away}" if round_label else f"{td_home} vs {td_away}"
+                        def _is_real(name: str) -> bool:
+                            return name not in ("TBD", "") and not re.match(r'^World Cup Match', name)
+                        if _is_real(td_home) or _is_real(td_away):
+                            h = td_home if _is_real(td_home) else "TBD"
+                            a = td_away if _is_real(td_away) else "TBD"
+                            return f"{round_label}: {h} vs {a}" if round_label else f"{h} vs {a}"
                         elif mc:
                             return f"{round_label}: {mc}" if round_label else mc
         except Exception:
