@@ -234,6 +234,14 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                     "get_in_price": None,
                     "profit_margin": None,
                 })
+            state[composite_key] = {
+                "min_price": rtt_price,
+                "get_in_price": None,
+                "margin": None,
+                "match_key": listing["match_key"],
+                "match_label": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
+                "category": listing["category"],
+            }
             continue
 
         seller_net, margin = compute_profit(rtt_price, get_in, cfg)
