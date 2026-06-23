@@ -45,8 +45,8 @@ def _resolve_group_code(code: str, rankings: dict) -> Optional[str]:
 
 
 CAT1_MULTIPLIER = 1.20
-BUYER_FEE = 0.20
-SELLER_FEE = 0.10
+BUYER_FEE = 0.00
+SELLER_FEE = 0.20
 MARGIN_THRESHOLD = 0.05
 DOLLAR_THRESHOLD = 300
 
@@ -614,7 +614,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 </div>
 
 <div class="formula-note">
-  <span><b>Formula:</b> seller_net = get_in ÷ 1.20 × 0.90 &nbsp;·&nbsp; profit = seller_net − RTT price</span>
+  <span><b>Formula:</b> seller_net = get_in × 0.80 &nbsp;·&nbsp; profit = seller_net − RTT price</span>
   <span><b>Cat multipliers:</b> Cat1 × 1.20, Cat2 × 1.00, Cat3 × 0.80</span>
   <span><b>Alert:</b> margin ≥ {int(MARGIN_THRESHOLD*100)}% OR profit ≥ ${DOLLAR_THRESHOLD}</span>
 </div>

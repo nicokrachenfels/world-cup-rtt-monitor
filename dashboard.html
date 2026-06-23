@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTT Arbitrage Monitor</title>
+<style>
+  :root {
+    --bg: #080C16;
+    --surface: #0C1220;
+    --surface2: #111826;
+    --border: #1B2640;
+    --row-border: rgba(27,38,64,.65);
+    --text: #DCE3F0;
+    --text-dim: #5B7192;
+    --text-muted: #344358;
+    --green: #05C96A;
+    --green-dim: #034D2A;
+    --green-bg: rgba(5,201,106,.05);
+    --red: #F04461;
+    --red-dim: #5A1122;
+    --red-bg: rgba(240,68,97,.05);
+    --amber: #F59E0B;
+    --blue: #4EA8DE;
+    --purple: #A78BFA;
+    --accent: #05C96A;
+    --accent2: #04A354;
+    --mono: "SF Mono","Fira Code","Cascadia Code",ui-monospace,monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── Header ── */
+  header {
+    background: linear-gradient(135deg, #0E1828 0%, #080C16 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 0 28px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+  header h1 { font-size: 15px; font-weight: 700; letter-spacing: .01em; display: flex; align-items: center; gap: 8px; }
+  header h1 .icon { font-size: 18px; }
+  header .meta { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 16px; }
+  header .meta .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+
+  /* ── Controls ── */
+  .controls {
+    padding: 12px 28px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 5px 10px;
+  }
+  .filter-group label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); white-space: nowrap; }
+  select {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    padding: 0 2px;
+  }
+  select option { background: #111826; }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-dim);
+    transition: border-color .15s, background .15s;
+    user-select: none;
+  }
+  .toggle:has(input:checked) {
+    border-color: var(--accent);
+    background: rgba(5,201,106,.09);
+    color: var(--text);
+  }
+  .toggle input { display: none; }
+  .toggle .pip {
+    width: 28px; height: 16px;
+    background: var(--border);
+    border-radius: 8px;
+    position: relative;
+    transition: background .15s;
+  }
+  .toggle:has(input:checked) .pip { background: var(--accent); }
+  .toggle .pip::after {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform .15s;
+  }
+  .toggle:has(input:checked) .pip::after { transform: translateX(12px); }
+
+  /* ── Table ── */
+  .table-wrap { padding: 20px 28px 40px; }
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  thead { background: var(--surface2); }
+  th {
+    position: sticky;
+    top: 56px;
+    z-index: 20;
+    background: var(--surface2);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+  }
+  th:hover { color: var(--text); }
+  th.num { text-align: right; }
+  th.sorted-asc::after { content: " ↑"; color: var(--accent); }
+  th.sorted-desc::after { content: " ↓"; color: var(--accent); }
+  td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    transition: background .1s;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(5,201,106,.025); }
+  tr.alert-row td { background: var(--green-bg); }
+  tr.alert-row:hover td { background: rgba(5,201,106,.10); }
+  tr.dead-row td { background: var(--red-bg); }
+  .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  td.match-cell { font-weight: 500; min-width: 220px; white-space: normal; }
+  td.match-cell .date-sub { font-size: 10.5px; color: #6B84A2; margin-top: 2px; }
+
+  /* ── Number colors ── */
+  .profit-pos { color: var(--green); font-weight: 700; }
+  .profit-neg { color: var(--red); }
+  .margin-pos { color: var(--green); font-weight: 700; }
+  .margin-neg { color: var(--red); }
+  .dim { color: var(--text-dim); }
+  .very-dim { color: var(--text-muted); }
+
+  /* ── Cat pill ── */
+  .cat-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .04em;
+  }
+  .cat-1 { background: rgba(167,139,250,.15); color: var(--purple); }
+  .cat-2 { background: rgba(96,165,250,.12); color: var(--blue); }
+  .cat-3 { background: rgba(100,116,139,.15); color: #94a3b8; }
+
+  /* ── No results ── */
+  #no-results {
+    display: none;
+    padding: 60px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    background: var(--surface);
+    border-radius: 10px;
+    margin-top: 0;
+    border: 1px solid var(--border);
+  }
+  #no-results .icon { font-size: 32px; margin-bottom: 8px; }
+
+  /* ── Formula note ── */
+  .formula-note {
+    margin: 0 28px 24px;
+    padding: 10px 16px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .formula-note span { white-space: nowrap; }
+  .formula-note b { color: var(--text-dim); }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="icon">⚽</span> RTT Arbitrage Monitor</h1>
+  <div class="meta">
+    <div class="dot"></div>
+    <span id="updatedAt" data-utc="2026-06-23T18:15:43Z">Updated 2026-06-23T18:15:43Z</span>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="filter-group">
+    <label>Cat</label>
+    <select id="filterCat">
+      <option value="">All</option>
+      <option value="1">Cat 1</option>
+      <option value="2">Cat 2</option>
+      <option value="3">Cat 3</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Date</label>
+    <select id="filterDate">
+      <option value="">All</option>
+      <option value="JUL 1">JUL 1</option>
+<option value="JUL 10">JUL 10</option>
+<option value="JUL 11">JUL 11</option>
+<option value="JUL 12">JUL 12</option>
+<option value="JUL 14">JUL 14</option>
+<option value="JUL 15">JUL 15</option>
+<option value="JUL 18">JUL 18</option>
+<option value="JUL 19">JUL 19</option>
+<option value="JUL 2">JUL 2</option>
+<option value="JUL 3">JUL 3</option>
+<option value="JUL 4">JUL 4</option>
+<option value="JUL 5">JUL 5</option>
+<option value="JUL 6">JUL 6</option>
+<option value="JUL 7">JUL 7</option>
+<option value="JUL 9">JUL 9</option>
+<option value="JUN 27">JUN 27</option>
+<option value="JUN 28">JUN 28</option>
+<option value="JUN 29">JUN 29</option>
+<option value="JUN 30">JUN 30</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Teams</label>
+    <select id="filterTeams">
+      <option value="">All</option>
+      <option value="confirmed">Confirmed</option>
+      <option value="tbd">TBD</option>
+    </select>
+  </div>
+  <label class="toggle">
+    <input type="checkbox" id="filterAlerts">
+    <div class="pip"></div>
+    Alerts only (≥5% or +$300)
+  </label>
+</div>
+
+<div class="table-wrap">
+  <table id="mainTable">
+    <thead>
+      <tr>
+        <th data-col="match">Match</th>
+        <th data-col="cat">Cat</th>
+        <th data-col="rtt" class="num">RTT price</th>
+        <th data-col="breakeven" class="num">Breakeven</th>
+        <th data-col="profit" class="num">Profit $</th>
+        <th data-col="margin" class="num">Margin</th>
+        <th data-col="used" class="num">Cat-adj. get-in</th>
+        <th data-col="fees" class="num">Fees $</th>
+        <th data-col="td_floor" class="num">Floor price</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+  <div id="no-results">
+    <div class="icon">🔍</div>
+    No matches found for selected filters.
+  </div>
+</div>
+
+<div class="formula-note">
+  <span><b>Formula:</b> seller_net = get_in × 0.80 &nbsp;·&nbsp; profit = seller_net − RTT price</span>
+  <span><b>Cat multipliers:</b> Cat1 × 1.20, Cat2 × 1.00, Cat3 × 0.80</span>
+  <span><b>Alert:</b> margin ≥ 5% OR profit ≥ $300</span>
+</div>
+
+<script>
+const RAW = [{"match": "Cabo Verde vs Saudi Arabia", "subtitle": "Jun 27 \u00b7 Reliant Stadium, Houston", "home": "Cabo Verde", "away": "Saudi Arabia", "venue": "M65", "date": "JUN 27", "cat": "2", "rtt": 420.0, "td_floor": 704.0, "used": 704.0, "net": 563.2, "breakeven": 563.2, "fees": 140.8, "profit": 143.2, "margin": 0.341, "dead": false, "tbd": false, "alert": true}, {"match": "Cabo Verde vs Saudi Arabia", "subtitle": "Jun 27 \u00b7 Reliant Stadium, Houston", "home": "Cabo Verde", "away": "Saudi Arabia", "venue": "M65", "date": "JUN 27", "cat": "1", "rtt": 515.0, "td_floor": 704.0, "used": 844.8, "net": 675.84, "breakeven": 675.84, "fees": 168.96, "profit": 160.84, "margin": 0.3123, "dead": false, "tbd": false, "alert": true}, {"match": "New Zealand vs Belgium", "subtitle": "Jun 27 \u00b7 BC Place Stadium, Vancouver", "home": "New Zealand", "away": "Belgium", "venue": "M64", "date": "JUN 27", "cat": "1", "rtt": 550.0, "td_floor": 694.0, "used": 832.8, "net": 666.24, "breakeven": 666.24, "fees": 166.56, "profit": 116.24, "margin": 0.2113, "dead": false, "tbd": false, "alert": true}, {"match": "Colombia vs Portugal", "subtitle": "Jun 28 \u00b7 Hard Rock Stadium, Miami Gardens", "home": "Colombia", "away": "Portugal", "venue": "M71", "date": "JUN 28", "cat": "1", "rtt": 3000.0, "td_floor": 3671.0, "used": 4405.2, "net": 3524.16, "breakeven": 3524.16, "fees": 881.04, "profit": 524.16, "margin": 0.1747, "dead": false, "tbd": false, "alert": true}, {"match": "Round of 16: W85 vs W87", "subtitle": "Jul 7 \u00b7 BC Place Stadium, Vancouver", "home": "TBD", "away": "TBD", "venue": "M96", "date": "JUL 7", "cat": "2", "rtt": 1850.0, "td_floor": 2629.0, "used": 2629.0, "net": 2103.2, "breakeven": 2103.2, "fees": 525.8, "profit": 253.2, "margin": 0.1369, "dead": false, "tbd": true, "alert": true}, {"match": "Round of 16: W73 vs W75", "subtitle": "Jul 4 \u00b7 Reliant Stadium, Houston", "home": "TBD", "away": "TBD", "venue": "M90", "date": "JUL 4", "cat": "1", "rtt": 2300.0, "td_floor": 2671.0, "used": 3205.2, "net": 2564.16, "breakeven": 2564.16, "fees": 641.04, "profit": 264.16, "margin": 0.1149, "dead": false, "tbd": true, "alert": true}, {"match": "Quarter-final: W95 vs W96", "subtitle": "Jul 12 \u00b7 GEHA Field at Arrowhead Stadium, Kansas City", "home": "TBD", "away": "TBD", "venue": "M100", "date": "JUL 12", "cat": "2", "rtt": 3000.0, "td_floor": 4079.0, "used": 4079.0, "net": 3263.2, "breakeven": 3263.2, "fees": 815.8, "profit": 263.2, "margin": 0.0877, "dead": false, "tbd": true, "alert": true}, {"match": "Round of 32: France (lock) vs Sweden (proj.)", "subtitle": "Jun 30 \u00b7 MetLife Stadium, East Rutherford", "home": "TBD", "away": "TBD", "venue": "M77", "date": "JUN 30", "cat": "2", "rtt": 1250.0, "td_floor": 1632.0, "used": 1632.0, "net": 1305.6, "breakeven": 1305.6, "fees": 326.4, "profit": 55.6, "margin": 0.0445, "dead": false, "tbd": true, "alert": false}, {"match": "Quarter-final: W89 vs W90", "subtitle": "Jul 9 \u00b7 Gillette Stadium, Foxborough", "home": "TBD", "away": "TBD", "venue": "M97", "date": "JUL 9", "cat": "2", "rtt": 2500.0, "td_floor": 3164.0, "used": 3164.0, "net": 2531.2, "breakeven": 2531.2, "fees": 632.8, "profit": 31.2, "margin": 0.0125, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Ivory Coast (proj.) vs Norway (lock)", "subtitle": "Jun 30 \u00b7 AT&T Stadium, Arlington", "home": "TBD", "away": "TBD", "venue": "M78", "date": "JUN 30", "cat": "2", "rtt": 1048.0, "td_floor": 1319.0, "used": 1319.0, "net": 1055.2, "breakeven": 1055.2, "fees": 263.8, "profit": 7.2, "margin": 0.0069, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W74 vs W77", "subtitle": "Jul 4 \u00b7 Lincoln Financial Field, Philadelphia", "home": "TBD", "away": "TBD", "venue": "M89", "date": "JUL 4", "cat": "1", "rtt": 2888.0, "td_floor": 2998.0, "used": 3597.6, "net": 2878.08, "breakeven": 2878.08, "fees": 719.52, "profit": -9.92, "margin": -0.0034, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W74 vs W77", "subtitle": "Jul 4 \u00b7 Lincoln Financial Field, Philadelphia", "home": "TBD", "away": "TBD", "venue": "M89", "date": "JUL 4", "cat": "2", "rtt": 2450.0, "td_floor": 2998.0, "used": 2998.0, "net": 2398.4, "breakeven": 2398.4, "fees": 599.6, "profit": -51.6, "margin": -0.0211, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Ivory Coast (proj.) vs Norway (lock)", "subtitle": "Jun 30 \u00b7 AT&T Stadium, Arlington", "home": "TBD", "away": "TBD", "venue": "M78", "date": "JUN 30", "cat": "1", "rtt": 1299.0, "td_floor": 1319.0, "used": 1582.8, "net": 1266.24, "breakeven": 1266.24, "fees": 316.56, "profit": -32.76, "margin": -0.0252, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W73 vs W75", "subtitle": "Jul 4 \u00b7 Reliant Stadium, Houston", "home": "TBD", "away": "TBD", "venue": "M90", "date": "JUL 4", "cat": "2", "rtt": 2200.0, "td_floor": 2671.0, "used": 2671.0, "net": 2136.8, "breakeven": 2136.8, "fees": 534.2, "profit": -63.2, "margin": -0.0287, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Brazil (proj.) vs Japan (proj.)", "subtitle": "Jun 29 \u00b7 Reliant Stadium, Houston", "home": "TBD", "away": "TBD", "venue": "M76", "date": "JUN 29", "cat": "1", "rtt": 1800.0, "td_floor": 1819.0, "used": 2182.8, "net": 1746.24, "breakeven": 1746.24, "fees": 436.56, "profit": -53.76, "margin": -0.0299, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W83 vs W84", "subtitle": "Jul 6 \u00b7 AT&T Stadium, Arlington", "home": "TBD", "away": "TBD", "venue": "M93", "date": "JUL 6", "cat": "1", "rtt": 2900.0, "td_floor": 2907.0, "used": 3488.4, "net": 2790.72, "breakeven": 2790.72, "fees": 697.68, "profit": -109.28, "margin": -0.0377, "dead": false, "tbd": true, "alert": false}, {"match": "3rd Place: RU101 vs RU102", "subtitle": "Jul 18 \u00b7 Hard Rock Stadium, Miami Gardens", "home": "TBD", "away": "TBD", "venue": "M103", "date": "JUL 18", "cat": "1", "rtt": 2299.0, "td_floor": 2274.0, "used": 2728.8, "net": 2183.04, "breakeven": 2183.04, "fees": 545.76, "profit": -115.96, "margin": -0.0504, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W83 vs W84", "subtitle": "Jul 6 \u00b7 AT&T Stadium, Arlington", "home": "TBD", "away": "TBD", "venue": "M93", "date": "JUL 6", "cat": "2", "rtt": 2480.0, "td_floor": 2907.0, "used": 2907.0, "net": 2325.6, "breakeven": 2325.6, "fees": 581.4, "profit": -154.4, "margin": -0.0623, "dead": false, "tbd": true, "alert": false}, {"match": "Quarter-final: W95 vs W96", "subtitle": "Jul 12 \u00b7 GEHA Field at Arrowhead Stadium, Kansas City", "home": "TBD", "away": "TBD", "venue": "M100", "date": "JUL 12", "cat": "1", "rtt": 4200.0, "td_floor": 4079.0, "used": 4894.8, "net": 3915.84, "breakeven": 3915.84, "fees": 978.96, "profit": -284.16, "margin": -0.0677, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W76 vs W78", "subtitle": "Jul 5 \u00b7 MetLife Stadium, East Rutherford", "home": "TBD", "away": "TBD", "venue": "M91", "date": "JUL 5", "cat": "2", "rtt": 2355.0, "td_floor": 2739.0, "used": 2739.0, "net": 2191.2, "breakeven": 2191.2, "fees": 547.8, "profit": -163.8, "margin": -0.0696, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Argentina (lock) vs Uruguay (proj.)", "subtitle": "Jul 4 \u00b7 Hard Rock Stadium, Miami Gardens", "home": "TBD", "away": "TBD", "venue": "M86", "date": "JUL 4", "cat": "1", "rtt": 3399.0, "td_floor": 3294.0, "used": 3952.8, "net": 3162.24, "breakeven": 3162.24, "fees": 790.56, "profit": -236.76, "margin": -0.0697, "dead": false, "tbd": true, "alert": false}, {"match": "Algeria vs Austria", "subtitle": "Jun 28 \u00b7 GEHA Field at Arrowhead Stadium, Kansas City", "home": "Algeria", "away": "Austria", "venue": "M69", "date": "JUN 28", "cat": "1", "rtt": 600.0, "td_floor": 581.0, "used": 697.2, "net": 557.76, "breakeven": 557.76, "fees": 139.44, "profit": -42.24, "margin": -0.0704, "dead": false, "tbd": false, "alert": false}, {"match": "Quarter-final: W91 vs W92", "subtitle": "Jul 11 \u00b7 Hard Rock Stadium, Miami Gardens", "home": "TBD", "away": "TBD", "venue": "M99", "date": "JUL 11", "cat": "2", "rtt": 3459.0, "td_floor": 4001.0, "used": 4001.0, "net": 3200.8, "breakeven": 3200.8, "fees": 800.2, "profit": -258.2, "margin": -0.0746, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Spain (proj.) vs Austria (proj.)", "subtitle": "Jul 2 \u00b7 SoFi Stadium, Inglewood", "home": "TBD", "away": "TBD", "venue": "M84", "date": "JUL 2", "cat": "2", "rtt": 2000.0, "td_floor": 2312.0, "used": 2312.0, "net": 1849.6, "breakeven": 1849.6, "fees": 462.4, "profit": -150.4, "margin": -0.0752, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W76 vs W78", "subtitle": "Jul 5 \u00b7 MetLife Stadium, East Rutherford", "home": "TBD", "away": "TBD", "venue": "M91", "date": "JUL 5", "cat": "1", "rtt": 2875.0, "td_floor": 2739.0, "used": 3286.8, "net": 2629.44, "breakeven": 2629.44, "fees": 657.36, "profit": -245.56, "margin": -0.0854, "dead": false, "tbd": true, "alert": false}, {"match": "Quarter-final: W93 vs W94", "subtitle": "Jul 10 \u00b7 SoFi Stadium, Inglewood", "home": "TBD", "away": "TBD", "venue": "M98", "date": "JUL 10", "cat": "2", "rtt": 3750.0, "td_floor": 4284.0, "used": 4284.0, "net": 3427.2, "breakeven": 3427.2, "fees": 856.8, "profit": -322.8, "margin": -0.0861, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W86 vs W88", "subtitle": "Jul 7 \u00b7 Mercedes-Benz Stadium, Atlanta", "home": "TBD", "away": "TBD", "venue": "M95", "date": "JUL 7", "cat": "2", "rtt": 2799.0, "td_floor": 3136.0, "used": 3136.0, "net": 2508.8, "breakeven": 2508.8, "fees": 627.2, "profit": -290.2, "margin": -0.1037, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: South Korea (proj.) vs Switzerland (proj.)", "subtitle": "Jun 28 \u00b7 SoFi Stadium, Inglewood", "home": "TBD", "away": "TBD", "venue": "M73", "date": "JUN 28", "cat": "2", "rtt": 1195.0, "td_floor": 1324.0, "used": 1324.0, "net": 1059.2, "breakeven": 1059.2, "fees": 264.8, "profit": -135.8, "margin": -0.1136, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: United States (lock) vs Algeria (proj.)", "subtitle": "Jul 2 \u00b7 Levi's Stadium, Santa Clara", "home": "TBD", "away": "TBD", "venue": "M81", "date": "JUL 2", "cat": "2", "rtt": 2249.0, "td_floor": 2482.0, "used": 2482.0, "net": 1985.6, "breakeven": 1985.6, "fees": 496.4, "profit": -263.4, "margin": -0.1171, "dead": false, "tbd": true, "alert": false}, {"match": "Panama vs England", "subtitle": "Jun 27 \u00b7 MetLife Stadium, East Rutherford", "home": "Panama", "away": "England", "venue": "M67", "date": "JUN 27", "cat": "1", "rtt": 1750.0, "td_floor": 1582.0, "used": 1898.4, "net": 1518.72, "breakeven": 1518.72, "fees": 379.68, "profit": -231.28, "margin": -0.1322, "dead": false, "tbd": false, "alert": false}, {"match": "Jordan vs Argentina", "subtitle": "Jun 28 \u00b7 AT&T Stadium, Arlington", "home": "Jordan", "away": "Argentina", "venue": "M70", "date": "JUN 28", "cat": "1", "rtt": 2299.0, "td_floor": 2076.0, "used": 2491.2, "net": 1992.96, "breakeven": 1992.96, "fees": 498.24, "profit": -306.04, "margin": -0.1331, "dead": true, "tbd": false, "alert": false}, {"match": "Round of 32: Colombia (proj.) vs Ghana (proj.)", "subtitle": "Jul 4 \u00b7 GEHA Field at Arrowhead Stadium, Kansas City", "home": "TBD", "away": "TBD", "venue": "M87", "date": "JUL 4", "cat": "1", "rtt": 2100.0, "td_floor": 1883.0, "used": 2259.6, "net": 1807.68, "breakeven": 1807.68, "fees": 451.92, "profit": -292.32, "margin": -0.1392, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: South Korea (proj.) vs Switzerland (proj.)", "subtitle": "Jun 28 \u00b7 SoFi Stadium, Inglewood", "home": "TBD", "away": "TBD", "venue": "M73", "date": "JUN 28", "cat": "1", "rtt": 1488.0, "td_floor": 1324.0, "used": 1588.8, "net": 1271.04, "breakeven": 1271.04, "fees": 317.76, "profit": -216.96, "margin": -0.1458, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Spain (proj.) vs Austria (proj.)", "subtitle": "Jul 2 \u00b7 SoFi Stadium, Inglewood", "home": "TBD", "away": "TBD", "venue": "M84", "date": "JUL 2", "cat": "1", "rtt": 2600.0, "td_floor": 2312.0, "used": 2774.4, "net": 2219.52, "breakeven": 2219.52, "fees": 554.88, "profit": -380.48, "margin": -0.1463, "dead": false, "tbd": true, "alert": false}, {"match": "Quarter-final: W91 vs W92", "subtitle": "Jul 11 \u00b7 Hard Rock Stadium, Miami Gardens", "home": "TBD", "away": "TBD", "venue": "M99", "date": "JUL 11", "cat": "1", "rtt": 4500.0, "td_floor": 4001.0, "used": 4801.2, "net": 3840.96, "breakeven": 3840.96, "fees": 960.24, "profit": -659.04, "margin": -0.1465, "dead": false, "tbd": true, "alert": false}, {"match": "Congo DR vs Uzbekistan", "subtitle": "Jun 28 \u00b7 Mercedes-Benz Stadium, Atlanta", "home": "Congo DR", "away": "Uzbekistan", "venue": "M72", "date": "JUN 28", "cat": "2", "rtt": 600.0, "td_floor": 634.0, "used": 634.0, "net": 507.2, "breakeven": 507.2, "fees": 126.8, "profit": -92.8, "margin": -0.1547, "dead": false, "tbd": false, "alert": false}, {"match": "Round of 16: W81 vs W82", "subtitle": "Jul 7 \u00b7 Lumen Field, Seattle", "home": "TBD", "away": "TBD", "venue": "M94", "date": "JUL 7", "cat": "1", "rtt": 3750.0, "td_floor": 3233.0, "used": 3879.6, "net": 3103.68, "breakeven": 3103.68, "fees": 775.92, "profit": -646.32, "margin": -0.1724, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Argentina (lock) vs Uruguay (proj.)", "subtitle": "Jul 4 \u00b7 Hard Rock Stadium, Miami Gardens", "home": "TBD", "away": "TBD", "venue": "M86", "date": "JUL 4", "cat": "2", "rtt": 3200.0, "td_floor": 3294.0, "used": 3294.0, "net": 2635.2, "breakeven": 2635.2, "fees": 658.8, "profit": -564.8, "margin": -0.1765, "dead": false, "tbd": true, "alert": false}, {"match": "Quarter-final: W89 vs W90", "subtitle": "Jul 9 \u00b7 Gillette Stadium, Foxborough", "home": "TBD", "away": "TBD", "venue": "M97", "date": "JUL 9", "cat": "1", "rtt": 3700.0, "td_floor": 3164.0, "used": 3796.8, "net": 3037.44, "breakeven": 3037.44, "fees": 759.36, "profit": -662.56, "margin": -0.1791, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W86 vs W88", "subtitle": "Jul 7 \u00b7 Mercedes-Benz Stadium, Atlanta", "home": "TBD", "away": "TBD", "venue": "M95", "date": "JUL 7", "cat": "1", "rtt": 3688.0, "td_floor": 3136.0, "used": 3763.2, "net": 3010.56, "breakeven": 3010.56, "fees": 752.64, "profit": -677.44, "margin": -0.1837, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: England (proj.) vs Congo DR (proj.)", "subtitle": "Jul 1 \u00b7 Mercedes-Benz Stadium, Atlanta", "home": "TBD", "away": "TBD", "venue": "M80", "date": "JUL 1", "cat": "2", "rtt": 1650.0, "td_floor": 1682.0, "used": 1682.0, "net": 1345.6, "breakeven": 1345.6, "fees": 336.4, "profit": -304.4, "margin": -0.1845, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Netherlands (proj.) vs Morocco (proj.)", "subtitle": "Jun 30 \u00b7 Estadio BBVA, Monterrey", "home": "TBD", "away": "TBD", "venue": "M75", "date": "JUN 30", "cat": "1", "rtt": 2400.0, "td_floor": 2036.0, "used": 2443.2, "net": 1954.56, "breakeven": 1954.56, "fees": 488.64, "profit": -445.44, "margin": -0.1856, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: England (proj.) vs Congo DR (proj.)", "subtitle": "Jul 1 \u00b7 Mercedes-Benz Stadium, Atlanta", "home": "TBD", "away": "TBD", "venue": "M80", "date": "JUL 1", "cat": "1", "rtt": 2000.0, "td_floor": 1682.0, "used": 2018.4, "net": 1614.72, "breakeven": 1614.72, "fees": 403.68, "profit": -385.28, "margin": -0.1926, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Colombia (proj.) vs Ghana (proj.)", "subtitle": "Jul 4 \u00b7 GEHA Field at Arrowhead Stadium, Kansas City", "home": "TBD", "away": "TBD", "venue": "M87", "date": "JUL 4", "cat": "2", "rtt": 1870.0, "td_floor": 1883.0, "used": 1883.0, "net": 1506.4, "breakeven": 1506.4, "fees": 376.6, "profit": -363.6, "margin": -0.1944, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Australia (proj.) vs Iran (proj.)", "subtitle": "Jul 3 \u00b7 AT&T Stadium, Arlington", "home": "TBD", "away": "TBD", "venue": "M88", "date": "JUL 3", "cat": "1", "rtt": 1240.0, "td_floor": 1036.0, "used": 1243.2, "net": 994.56, "breakeven": 994.56, "fees": 248.64, "profit": -245.44, "margin": -0.1979, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: France (lock) vs Sweden (proj.)", "subtitle": "Jun 30 \u00b7 MetLife Stadium, East Rutherford", "home": "TBD", "away": "TBD", "venue": "M77", "date": "JUN 30", "cat": "1", "rtt": 1988.0, "td_floor": 1632.0, "used": 1958.4, "net": 1566.72, "breakeven": 1566.72, "fees": 391.68, "profit": -421.28, "margin": -0.2119, "dead": false, "tbd": true, "alert": false}, {"match": "Semi-final: W99 vs W100", "subtitle": "Jul 15 \u00b7 Mercedes-Benz Stadium, Atlanta", "home": "TBD", "away": "TBD", "venue": "M102", "date": "JUL 15", "cat": "2", "rtt": 5000.0, "td_floor": 4894.0, "used": 4894.0, "net": 3915.2, "breakeven": 3915.2, "fees": 978.8, "profit": -1084.8, "margin": -0.217, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Brazil (proj.) vs Japan (proj.)", "subtitle": "Jun 29 \u00b7 Reliant Stadium, Houston", "home": "TBD", "away": "TBD", "venue": "M76", "date": "JUN 29", "cat": "2", "rtt": 1875.0, "td_floor": 1819.0, "used": 1819.0, "net": 1455.2, "breakeven": 1455.2, "fees": 363.8, "profit": -419.8, "margin": -0.2239, "dead": false, "tbd": true, "alert": false}, {"match": "Quarter-final: W93 vs W94", "subtitle": "Jul 10 \u00b7 SoFi Stadium, Inglewood", "home": "TBD", "away": "TBD", "venue": "M98", "date": "JUL 10", "cat": "1", "rtt": 5379.0, "td_floor": 4284.0, "used": 5140.8, "net": 4112.64, "breakeven": 4112.64, "fees": 1028.16, "profit": -1266.36, "margin": -0.2354, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W81 vs W82", "subtitle": "Jul 7 \u00b7 Lumen Field, Seattle", "home": "TBD", "away": "TBD", "venue": "M94", "date": "JUL 7", "cat": "2", "rtt": 3500.0, "td_floor": 3233.0, "used": 3233.0, "net": 2586.4, "breakeven": 2586.4, "fees": 646.6, "profit": -913.6, "margin": -0.261, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Egypt (proj.) vs Czech Republic (proj.)", "subtitle": "Jul 1 \u00b7 Lumen Field, Seattle", "home": "TBD", "away": "TBD", "venue": "M82", "date": "JUL 1", "cat": "2", "rtt": 1100.0, "td_floor": 1006.0, "used": 1006.0, "net": 804.8, "breakeven": 804.8, "fees": 201.2, "profit": -295.2, "margin": -0.2684, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Canada (proj.) vs Belgium (proj.)", "subtitle": "Jul 3 \u00b7 BC Place Stadium, Vancouver", "home": "TBD", "away": "TBD", "venue": "M85", "date": "JUL 3", "cat": "2", "rtt": 1450.0, "td_floor": 1322.0, "used": 1322.0, "net": 1057.6, "breakeven": 1057.6, "fees": 264.4, "profit": -392.4, "margin": -0.2706, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Australia (proj.) vs Iran (proj.)", "subtitle": "Jul 3 \u00b7 AT&T Stadium, Arlington", "home": "TBD", "away": "TBD", "venue": "M88", "date": "JUL 3", "cat": "2", "rtt": 1150.0, "td_floor": 1036.0, "used": 1036.0, "net": 828.8, "breakeven": 828.8, "fees": 207.2, "profit": -321.2, "margin": -0.2793, "dead": false, "tbd": true, "alert": false}, {"match": "Semi-final: W99 vs W100", "subtitle": "Jul 15 \u00b7 Mercedes-Benz Stadium, Atlanta", "home": "TBD", "away": "TBD", "venue": "M102", "date": "JUL 15", "cat": "3", "rtt": 4500.0, "td_floor": 4894.0, "used": 3915.2, "net": 3132.16, "breakeven": 3132.16, "fees": 783.04, "profit": -1367.84, "margin": -0.304, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Egypt (proj.) vs Czech Republic (proj.)", "subtitle": "Jul 1 \u00b7 Lumen Field, Seattle", "home": "TBD", "away": "TBD", "venue": "M82", "date": "JUL 1", "cat": "1", "rtt": 1388.0, "td_floor": 1006.0, "used": 1207.2, "net": 965.76, "breakeven": 965.76, "fees": 241.44, "profit": -422.24, "margin": -0.3042, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Germany (lock) vs Scotland (proj.)", "subtitle": "Jun 29 \u00b7 Gillette Stadium, Foxborough", "home": "TBD", "away": "TBD", "venue": "M74", "date": "JUN 29", "cat": "1", "rtt": 1740.0, "td_floor": 1256.0, "used": 1507.2, "net": 1205.76, "breakeven": 1205.76, "fees": 301.44, "profit": -534.24, "margin": -0.307, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Germany (lock) vs Scotland (proj.)", "subtitle": "Jun 29 \u00b7 Gillette Stadium, Foxborough", "home": "TBD", "away": "TBD", "venue": "M74", "date": "JUN 29", "cat": "2", "rtt": 1488.0, "td_floor": 1256.0, "used": 1256.0, "net": 1004.8, "breakeven": 1004.8, "fees": 251.2, "profit": -483.2, "margin": -0.3247, "dead": false, "tbd": true, "alert": false}, {"match": "Final: W101 vs W102", "subtitle": "Jul 19 \u00b7 MetLife Stadium, East Rutherford", "home": "TBD", "away": "TBD", "venue": "M104", "date": "JUL 19", "cat": "3", "rtt": 11775.0, "td_floor": 11922.0, "used": 9537.6, "net": 7630.08, "breakeven": 7630.08, "fees": 1907.52, "profit": -4144.92, "margin": -0.352, "dead": false, "tbd": true, "alert": false}, {"match": "Semi-final: W97 vs W98", "subtitle": "Jul 14 \u00b7 AT&T Stadium, Arlington", "home": "TBD", "away": "TBD", "venue": "M101", "date": "JUL 14", "cat": "2", "rtt": 5599.0, "td_floor": 4470.0, "used": 4470.0, "net": 3576.0, "breakeven": 3576.0, "fees": 894.0, "profit": -2023.0, "margin": -0.3613, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: United States (lock) vs Algeria (proj.)", "subtitle": "Jul 2 \u00b7 Levi's Stadium, Santa Clara", "home": "TBD", "away": "TBD", "venue": "M81", "date": "JUL 2", "cat": "1", "rtt": 3950.0, "td_floor": 2482.0, "used": 2978.4, "net": 2382.72, "breakeven": 2382.72, "fees": 595.68, "profit": -1567.28, "margin": -0.3968, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W85 vs W87", "subtitle": "Jul 7 \u00b7 BC Place Stadium, Vancouver", "home": "TBD", "away": "TBD", "venue": "M96", "date": "JUL 7", "cat": "1", "rtt": 4500.0, "td_floor": 2629.0, "used": 3154.8, "net": 2523.84, "breakeven": 2523.84, "fees": 630.96, "profit": -1976.16, "margin": -0.4391, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 16: W79 vs W80", "subtitle": "Jul 6 \u00b7 Estadio Azteca, Mexico City", "home": "TBD", "away": "TBD", "venue": "M92", "date": "JUL 6", "cat": "1", "rtt": 5900.0, "td_floor": 3403.0, "used": 4083.6, "net": 3266.88, "breakeven": 3266.88, "fees": 816.72, "profit": -2633.12, "margin": -0.4463, "dead": false, "tbd": true, "alert": false}, {"match": "Jordan vs Argentina", "subtitle": "Jun 28 \u00b7 AT&T Stadium, Arlington", "home": "Jordan", "away": "Argentina", "venue": "M70", "date": "JUN 28", "cat": "2", "rtt": 3000.0, "td_floor": 2076.0, "used": 2076.0, "net": 1660.8, "breakeven": 1660.8, "fees": 415.2, "profit": -1339.2, "margin": -0.4464, "dead": true, "tbd": false, "alert": false}, {"match": "Round of 32: Canada (proj.) vs Belgium (proj.)", "subtitle": "Jul 3 \u00b7 BC Place Stadium, Vancouver", "home": "TBD", "away": "TBD", "venue": "M85", "date": "JUL 3", "cat": "1", "rtt": 2399.0, "td_floor": 1322.0, "used": 1586.4, "net": 1269.12, "breakeven": 1269.12, "fees": 317.28, "profit": -1129.88, "margin": -0.471, "dead": false, "tbd": true, "alert": false}, {"match": "Round of 32: Mexico (lock) vs Cape Verde (proj.)", "subtitle": "Jul 1 \u00b7 Estadio Azteca, Mexico City", "home": "TBD", "away": "TBD", "venue": "M79", "date": "JUL 1", "cat": "2", "rtt": 5129.0, "td_floor": 2645.0, "used": 2645.0, "net": 2116.0, "breakeven": 2116.0, "fees": 529.0, "profit": -3013.0, "margin": -0.5874, "dead": false, "tbd": true, "alert": false}];
+let sortCol = "margin", sortDir = -1;
+
+function fmt(n) {
+  return new Intl.NumberFormat("en-US", {maximumFractionDigits: 0}).format(n);
+}
+
+function fmtDate(d) {
+  if (!d || d === "Unknown") return "";
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  // "JUN 25" format from FIFA RTT
+  const MON = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+  const parts = d.split(" ");
+  if (parts.length === 2 && MON[parts[0]] !== undefined)
+    return `${MONTHS[MON[parts[0]]]} ${parseInt(parts[1])}`;
+  // "2026-07-04" fallback
+  const [, m, day] = d.split("-");
+  if (m) return `${MONTHS[+m-1]} ${+day}`;
+  return d;
+}
+
+function renderTable() {
+  const cat = document.getElementById("filterCat").value;
+  const date = document.getElementById("filterDate").value;
+  const teams = document.getElementById("filterTeams").value;
+  const alertsOnly = document.getElementById("filterAlerts").checked;
+
+  let rows = RAW.filter(r => {
+    if (cat && r.cat !== cat) return false;
+    if (date && r.date !== date) return false;
+    if (teams === "confirmed" && r.tbd) return false;
+    if (teams === "tbd" && !r.tbd) return false;
+    if (alertsOnly && !r.alert) return false;
+    return true;
+  });
+
+  rows = [...rows].sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol];
+    if (typeof av === "string") av = av.toLowerCase(), bv = bv.toLowerCase();
+    return sortDir * (av < bv ? -1 : av > bv ? 1 : 0);
+  });
+
+  const tbody = document.getElementById("tableBody");
+  tbody.innerHTML = "";
+
+  if (rows.length === 0) {
+    document.getElementById("no-results").style.display = "block";
+    document.getElementById("mainTable").style.display = "none";
+    return;
+  }
+  document.getElementById("no-results").style.display = "none";
+  document.getElementById("mainTable").style.display = "";
+
+  rows.forEach(r => {
+    const pct = (r.margin * 100).toFixed(1) + "%";
+    const pctClass = r.margin > 0 ? "margin-pos" : "margin-neg";
+    const profitClass = r.profit >= 0 ? "profit-pos" : "profit-neg";
+    const profitStr = (r.profit >= 0 ? "+$" : "−$") + fmt(Math.abs(r.profit));
+    const rowClass = r.alert ? "alert-row" : r.dead ? "dead-row" : "";
+    const catClass = `cat-${r.cat}`;
+
+    const sub = r.subtitle || fmtDate(r.date);
+
+    tbody.innerHTML += `<tr class="${rowClass}">
+      <td class="match-cell">
+        <div>${r.match}</div>
+        ${sub ? `<div class="date-sub">${sub}</div>` : ""}
+      </td>
+      <td><span class="cat-pill ${catClass}">Cat ${r.cat}</span></td>
+      <td class="num dim">$${fmt(r.rtt)}</td>
+      <td class="num dim">$${fmt(r.breakeven)}</td>
+      <td class="num ${profitClass}">${profitStr}</td>
+      <td class="num ${pctClass}">${pct}</td>
+      <td class="num dim">$${fmt(r.used)}</td>
+      <td class="num very-dim">$${fmt(r.fees)}</td>
+      <td class="num very-dim">$${fmt(r.td_floor)}</td>
+    </tr>`;
+  });
+}
+
+document.querySelectorAll("th[data-col]").forEach(th => {
+  th.addEventListener("click", () => {
+    const col = th.dataset.col;
+    if (sortCol === col) sortDir *= -1;
+    else { sortCol = col; sortDir = -1; }
+    document.querySelectorAll("th").forEach(t => t.classList.remove("sorted-asc","sorted-desc"));
+    th.classList.add(sortDir === 1 ? "sorted-asc" : "sorted-desc");
+    renderTable();
+  });
+});
+
+["filterCat","filterDate","filterTeams"].forEach(id =>
+  document.getElementById(id).addEventListener("change", renderTable));
+document.getElementById("filterAlerts").addEventListener("change", renderTable);
+
+document.querySelector('th[data-col="margin"]').classList.add("sorted-desc");
+renderTable();
+
+(function() {
+  const el = document.getElementById("updatedAt");
+  if (!el) return;
+  const d = new Date(el.dataset.utc);
+  if (isNaN(d)) return;
+  el.textContent = "Updated " + d.toLocaleString(undefined, {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit"
+  });
+})();
+</script>
+</body>
+</html>

@@ -18,6 +18,7 @@ from typing import Optional
 import re
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
+from scraper.viagogo import scrape_viagogo_min_price
 from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams
 from scraper.standings import fetch_standings, is_deadwood_match, get_group_rankings
 from scraper.bbc_bracket import scrape_bbc_bracket
@@ -192,6 +193,45 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     logger.info(f"TicketData returned {len(td_matches)} matches")
     bbc_proj = apply_bbc_projections(td_matches, bbc_pairs, rankings)
 
+    # ── 5. Viagogo personal ticket watch ─────────────────────────────────────
+    viagogo_url = cfg.get("viagogo_url")
+    vg_threshold = cfg.get("viagogo_price_threshold", 2600)
+    viagogo_drops: list[dict] = []
+
+    if viagogo_url:
+        logger.info("Checking Viagogo listing for Match 95 (Argentina)...")
+        vg_price = await scrape_viagogo_min_price(viagogo_url)
+        if vg_price is not None:
+            vg_state = state.get("_viagogo_m95", {})
+            last_alert = vg_state.get("last_alert_price")
+            is_new_low = last_alert is None or vg_price < last_alert
+
+            if vg_price < vg_threshold and is_new_low:
+                viagogo_drops.append({
+                    "match_name": "W86 vs W88 – Match 95 (Jul 7, Atlanta)",
+                    "current_price": vg_price,
+                    "previous_price": last_alert,
+                    "threshold": vg_threshold,
+                    "url": viagogo_url,
+                })
+                state["_viagogo_m95"] = {
+                    **vg_state,
+                    "last_alert_price": vg_price,
+                    "min_price": min(vg_state.get("min_price", vg_price), vg_price),
+                }
+                logger.info(
+                    f"ARGENTINA ALERT: ${vg_price:,.0f} < threshold ${vg_threshold:,.0f}"
+                    + (f" (prev alert ${last_alert:,.0f})" if last_alert else " (first alert)")
+                )
+            else:
+                prev_min = vg_state.get("min_price", vg_price)
+                state["_viagogo_m95"] = {**vg_state, "min_price": min(prev_min, vg_price)}
+                logger.info(
+                    f"Viagogo M95: ${vg_price:,.0f} "
+                    + (f"(above threshold ${vg_threshold:,.0f})" if vg_price >= vg_threshold
+                       else f"(no new low — last alert ${last_alert:,.0f})")
+                )
+
     # ── 6. Detect removed/sold listings ──────────────────────────────────
     prev_keys = {k for k in state if not k.startswith("_")}
     current_rtt_keys = set(filtered_mins.keys())
@@ -319,9 +359,9 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         logger.info("DRY RUN — no email sent")
         _print_summary(all_profitable, triggered)
         from alerts.email import _build_subject, _build_text_body
-        print(f"\nEMAIL SUBJECT: {_build_subject(all_profitable, removed_listings, new_listings)}\n")
-        print(_build_text_body(all_profitable, all_profitable, removed_listings, new_listings))
-    elif triggered or removed_listings or new_listings or force_alert:
+        print(f"\nEMAIL SUBJECT: {_build_subject(all_profitable, removed_listings, new_listings, viagogo_drops)}\n")
+        print(_build_text_body(all_profitable, all_profitable, removed_listings, new_listings, viagogo_drops))
+    elif triggered or removed_listings or new_listings or viagogo_drops or force_alert:
         sendgrid_key = _get_env("SENDGRID_API_KEY")
         from_email = _get_env("ALERT_FROM_EMAIL")
         to_email = cfg.get("alert_email") or _get_env("ALERT_EMAIL")
@@ -335,6 +375,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 all_profitable_listings=all_profitable,
                 removed_listings=removed_listings,
                 new_listings=new_listings,
+                viagogo_drops=viagogo_drops,
             )
         except Exception as e:
             logger.error(f"Email send failed (state still saved): {e}")
