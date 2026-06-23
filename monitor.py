@@ -18,9 +18,11 @@ from typing import Optional
 import re
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
-from scraper.ticketdata import scrape_all_matches, find_get_in_price
+from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams
 from scraper.standings import fetch_standings, is_deadwood_match, get_group_rankings
+from scraper.bbc_bracket import scrape_bbc_bracket
 from alerts.email import send_alert
+from analyze import _team_label, _resolve_group_code, _round_name, apply_bbc_projections
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,103 +62,61 @@ def compute_profit(rtt_price: float, get_in_price: float, cfg: dict) -> tuple[fl
     return seller_net, margin
 
 
-_GROUP_CODE_RE_MON = re.compile(r'^(\d)([A-Z])$')
-
-
-def _resolve_group_code(code: str, rankings: dict) -> str:
-    m = _GROUP_CODE_RE_MON.match(code.strip()) if code else None
-    if not m:
-        return code
-    pos, group = int(m.group(1)), m.group(2)
-    teams = rankings.get(group, [])
-    return teams[pos - 1] if pos <= len(teams) else code
-
-
-def _round_name(match_code: str) -> str:
-    try:
-        n = int(match_code[1:])
-    except (ValueError, IndexError):
-        return ""
-    if n <= 72:  return ""
-    if n <= 88:  return "Round of 32"
-    if n <= 96:  return "Round of 16"
-    if n <= 100: return "Quarter-final"
-    if n <= 102: return "Semi-final"
-    if n == 103: return "3rd Place"
-    if n == 104: return "Final"
-    return "Knockout"
-
-
-def _build_match_label(listing: dict, td_matches: dict, rankings: dict | None = None) -> str:
-    """
-    Build a human-readable match label for use in email alerts.
-    Falls back gracefully from full team names → round+code → generic.
-    """
+def _build_match_label(
+    listing: dict,
+    td_matches: dict,
+    rankings: dict,
+    statuses: dict,
+    bbc_proj: dict,
+) -> str:
     home = listing.get("home_team", "TBD")
     away = listing.get("away_team", "TBD")
-    venue = listing.get("venue", "")
-    date = listing.get("match_date", "")
-
     if home != "TBD" and away != "TBD":
         return f"{home} vs {away}"
 
-    # TBD match — try to resolve via match code
-    if re.match(r'^M\d+$', venue or ""):
-        td_m = next((m for m in td_matches.values() if m.get("match_code") == venue), None)
-        if td_m:
-            td_home = td_m.get("home_team", "TBD")
-            td_away = td_m.get("away_team", "TBD")
-            if rankings:
-                td_home = _resolve_group_code(td_home, rankings)
-                td_away = _resolve_group_code(td_away, rankings)
-            round_label = _round_name(venue)
+    venue_code = listing.get("venue", "")
+    round_label = _round_name(venue_code)
+    _td_m = next((m for m in td_matches.values() if m.get("match_code") == venue_code), None)
+    _h_code = _td_m.get("home_team", "TBD").strip("() ") if _td_m else "TBD"
+    _a_code = _td_m.get("away_team", "TBD").strip("() ") if _td_m else "TBD"
+    if re.match(r'^World Cup Match\b', _h_code, re.I): _h_code = "TBD"
+    if re.match(r'^World Cup Match\b', _a_code, re.I): _a_code = "TBD"
 
-            def _is_real(name: str) -> bool:
-                return name not in ("TBD", "") and not re.match(r'^World Cup Match', name)
+    def _fmt(name, raw):
+        return _team_label(name, raw, statuses, rankings)
 
-            if _is_real(td_home) or _is_real(td_away):
-                h = td_home if _is_real(td_home) else "TBD"
-                a = td_away if _is_real(td_away) else "TBD"
-                return f"{round_label}: {h} vs {a}" if round_label else f"{h} vs {a}"
-        round_label = _round_name(venue)
-        return f"{round_label}: {venue}" if round_label else venue
+    # 1. BBC bracket projection
+    bbc_teams = bbc_proj.get(venue_code)
+    if bbc_teams:
+        h_bbc, a_bbc = bbc_teams
+        teams_str = f"{_fmt(h_bbc, _h_code)} vs {_fmt(a_bbc, _a_code)}"
+        return f"{round_label}: {teams_str}" if round_label else teams_str
 
-    # Try city + date lookup in td_matches
-    if venue and venue != "Unknown" and date and date != "Unknown":
-        try:
-            from scraper.ticketdata import _normalize_city, _parse_rtt_date, _parse_td_date
-            city_norm = _normalize_city(venue)
-            rtt_month, rtt_day = _parse_rtt_date(date)
-            if rtt_month > 0:
-                for td_m in td_matches.values():
-                    td_city = _normalize_city(td_m.get("city", ""))
-                    td_month, td_day = _parse_td_date(td_m.get("match_date", ""))
-                    if td_city == city_norm and td_month == rtt_month and td_day == rtt_day:
-                        mc = td_m.get("match_code", "")
-                        round_label = _round_name(mc) if mc else ""
-                        td_home = td_m.get("home_team", "TBD")
-                        td_away = td_m.get("away_team", "TBD")
-                        if rankings:
-                            td_home = _resolve_group_code(td_home, rankings)
-                            td_away = _resolve_group_code(td_away, rankings)
-                        def _is_real(name: str) -> bool:
-                            return name not in ("TBD", "") and not re.match(r'^World Cup Match', name)
-                        if _is_real(td_home) or _is_real(td_away):
-                            h = td_home if _is_real(td_home) else "TBD"
-                            a = td_away if _is_real(td_away) else "TBD"
-                            return f"{round_label}: {h} vs {a}" if round_label else f"{h} vs {a}"
-                        elif mc:
-                            return f"{round_label}: {mc}" if round_label else mc
-        except Exception:
-            pass
+    # 2. TicketData both teams resolved
+    td_teams = find_td_teams(venue_code, td_matches) if venue_code else None
+    if td_teams:
+        h, a = td_teams
+        h_proj = _resolve_group_code(h, rankings)
+        a_proj = _resolve_group_code(a, rankings)
+        if h_proj and a_proj:
+            teams_str = f"{_fmt(h_proj, h)} vs {_fmt(a_proj, a)}"
+        else:
+            teams_str = f"{_fmt(h.strip('() '), h)} vs {_fmt(a.strip('() '), a)}"
+        return f"{round_label}: {teams_str}" if round_label else teams_str
 
-    # Last resort: use whatever venue info we have
-    if venue and venue != "Unknown":
-        round_label = _round_name(venue) if re.match(r'^M\d+$', venue) else ""
-        return f"{round_label}: {venue}" if round_label else f"Match at {venue}"
-    if date and date != "Unknown":
-        return f"Knockout Match ({date})"
-    return listing.get("match_key", "Knockout Match")
+    # 3. Partial resolution
+    if _td_m and (_h_code != "TBD" or _a_code != "TBD"):
+        h_resolved = _resolve_group_code(_h_code, rankings) if _h_code != "TBD" else None
+        a_resolved = _resolve_group_code(_a_code, rankings) if _a_code != "TBD" else None
+        h_name = h_resolved or (_h_code if _h_code != "TBD" else None)
+        a_name = a_resolved or (_a_code if _a_code != "TBD" else None)
+        h_str = _fmt(h_name, _h_code) if h_name else "TBD"
+        a_str = _fmt(a_name, _a_code) if a_name else "TBD"
+        teams_str = f"{h_str} vs {a_str}"
+        return f"{round_label}: {teams_str}" if round_label else teams_str
+
+    # 4. Fallback
+    return f"{round_label}: {venue_code}" if (round_label and venue_code) else (round_label or venue_code or listing.get("match_key", "Knockout Match"))
 
 
 def _get_env(key: str, required: bool = True) -> Optional[str]:
@@ -206,13 +166,16 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         logger.warning("Could not fetch standings — proceeding without team filtering")
     rankings = get_group_rankings(statuses) if statuses else {}
 
-    # ── 2. Scrape FIFA RTT page ───────────────────────────────────────────
-    logger.info("Scraping FIFA RTT marketplace...")
-    fifa_listings = await scrape_fifa_rtt(
-        fifa_email=os.getenv("FIFA_EMAIL"),
-        fifa_password=os.getenv("FIFA_PASSWORD"),
+    # ── 2. Scrape FIFA RTT page + BBC bracket concurrently ───────────────
+    logger.info("Scraping FIFA RTT marketplace and BBC bracket...")
+    bbc_pairs, fifa_listings = await asyncio.gather(
+        scrape_bbc_bracket(),
+        scrape_fifa_rtt(
+            fifa_email=os.getenv("FIFA_EMAIL"),
+            fifa_password=os.getenv("FIFA_PASSWORD"),
+        ),
     )
-    logger.info(f"Found {len(fifa_listings)} RTT listings")
+    logger.info(f"Found {len(fifa_listings)} RTT listings, {len(bbc_pairs)} BBC projections")
 
     rtt_mins = get_min_prices_by_match(fifa_listings)
     logger.info(f"Unique match+category combinations: {len(rtt_mins)}")
@@ -227,6 +190,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     logger.info("Scraping TicketData World Cup matches page...")
     td_matches = scrape_all_matches()
     logger.info(f"TicketData returned {len(td_matches)} matches")
+    bbc_proj = apply_bbc_projections(td_matches, bbc_pairs, rankings)
 
     # ── 6. Detect removed/sold listings ──────────────────────────────────
     prev_keys = {k for k in state if not k.startswith("_")}
@@ -264,7 +228,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             logger.debug(f"No get-in price for {listing['match_key']} — skipping profit calc")
             if is_brand_new:
                 new_listings.append({
-                    "match_key": _build_match_label(listing, td_matches, rankings),
+                    "match_key": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
                     "category": listing["category"],
                     "rtt_price": rtt_price,
                     "get_in_price": None,
@@ -277,7 +241,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         deadwood = is_deadwood_match(listing["home_team"], listing["away_team"], statuses)
 
         result = {
-            "match_key": _build_match_label(listing, td_matches, rankings),
+            "match_key": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
             "_raw_match_key": listing["match_key"],
             "home_team": listing["home_team"],
             "away_team": listing["away_team"],
@@ -313,7 +277,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         elif is_brand_new:
             # New listing that isn't profitable yet — track supply movement
             new_listings.append({
-                "match_key": _build_match_label(listing, td_matches, rankings),
+                "match_key": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
                 "category": listing["category"],
                 "rtt_price": rtt_price,
                 "get_in_price": get_in,
@@ -330,7 +294,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "get_in_price": get_in,
             "margin": margin,
             "match_key": listing["match_key"],
-            "match_label": _build_match_label(listing, td_matches, rankings),
+            "match_label": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
             "category": listing["category"],
         }
 
