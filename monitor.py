@@ -318,6 +318,9 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     if dry_run:
         logger.info("DRY RUN — no email sent")
         _print_summary(all_profitable, triggered)
+        from alerts.email import _build_subject, _build_text_body
+        print(f"\nEMAIL SUBJECT: {_build_subject(all_profitable, removed_listings, new_listings)}\n")
+        print(_build_text_body(all_profitable, all_profitable, removed_listings, new_listings))
     elif triggered or removed_listings or new_listings or force_alert:
         sendgrid_key = _get_env("SENDGRID_API_KEY")
         from_email = _get_env("ALERT_FROM_EMAIL")
