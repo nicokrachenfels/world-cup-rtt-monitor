@@ -1,9 +1,9 @@
 {
-  "profit_threshold": 0.05,
-  "profit_dollar_threshold": 300,
+  "profit_threshold": 0.15,
+  "profit_dollar_threshold": 250,
   "seller_fee": 0.20,
   "buyer_fee_markup": 0.00,
   "alert_email": "",
-  "viagogo_price_threshold": 2600,
+  "viagogo_price_threshold": 1950,
   "viagogo_url": "https://www.viagogo.com/Sports-Tickets/Soccer/Soccer-Tournament/World-Cup-Tickets/E-155049347?quantity=2"
 }
