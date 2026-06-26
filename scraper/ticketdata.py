@@ -147,6 +147,7 @@ def scrape_all_matches() -> dict[str, dict]:
         raw_date = event.get("event_datetime", "")
         match_date = raw_date[:10] if raw_date else event.get("date", "Unknown")[:10]
 
+        _pt = event.get("primary_tickets") or {}
         matches[key] = {
             "teams": f"{home} v {away}",
             "home_team": home,
@@ -157,6 +158,8 @@ def scrape_all_matches() -> dict[str, dict]:
             "get_in": float(get_in),
             "event_id": event.get("id"),
             "match_code": match_code,
+            "primary_tickets_count": _pt.get("count"),
+            "primary_tickets_status": _pt.get("status"),
         }
         logger.debug(f"  {home} v {away} | ${get_in:,} get-in | {match_date}")
 
@@ -295,6 +298,20 @@ def find_td_match(
             best_entry = match_data
 
     return best_entry if best_score >= 2 else None
+
+
+def find_td_inventory(
+    home_team: str,
+    away_team: str,
+    td_matches: dict[str, dict],
+    venue: Optional[str] = None,
+    date_str: Optional[str] = None,
+) -> tuple[Optional[int], Optional[str]]:
+    """Returns (primary_tickets_count, primary_tickets_status) for a match."""
+    match_data = find_td_match(home_team, away_team, td_matches, venue=venue, date_str=date_str)
+    if match_data is None:
+        return None, None
+    return match_data.get("primary_tickets_count"), match_data.get("primary_tickets_status")
 
 
 if __name__ == "__main__":

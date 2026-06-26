@@ -20,13 +20,14 @@ def send_alert(
     removed_listings: list[dict] = [],
     new_listings: list[dict] = [],
     viagogo_drops: list[dict] = [],
+    supply_dumps: list[dict] = [],
 ) -> None:
-    if not triggered_listings and not removed_listings and not new_listings and not viagogo_drops:
+    if not triggered_listings and not removed_listings and not new_listings and not viagogo_drops and not supply_dumps:
         return
 
-    subject = _build_subject(triggered_listings, removed_listings, new_listings, viagogo_drops)
-    html_body = _build_html_body(triggered_listings, all_profitable_listings, removed_listings, new_listings, viagogo_drops)
-    text_body = _build_text_body(triggered_listings, all_profitable_listings, removed_listings, new_listings, viagogo_drops)
+    subject = _build_subject(triggered_listings, removed_listings, new_listings, viagogo_drops, supply_dumps)
+    html_body = _build_html_body(triggered_listings, all_profitable_listings, removed_listings, new_listings, viagogo_drops, supply_dumps)
+    text_body = _build_text_body(triggered_listings, all_profitable_listings, removed_listings, new_listings, viagogo_drops, supply_dumps)
 
     payload = json.dumps({
         "personalizations": [{"to": [{"email": to_email}]}],
@@ -62,7 +63,7 @@ def send_alert(
         raise
 
 
-def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings: list[dict] = [], viagogo_drops: list[dict] = []) -> str:
+def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings: list[dict] = [], viagogo_drops: list[dict] = [], supply_dumps: list[dict] = []) -> str:
     if triggered and len(triggered) == 1:
         t = triggered[0]
         extras = []
@@ -72,6 +73,8 @@ def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings
             extras.append(f"{len(new_listings)} new")
         if viagogo_drops:
             extras.append("Argentina drop")
+        if supply_dumps:
+            extras.append(f"{len(supply_dumps)} supply dump{'s' if len(supply_dumps) > 1 else ''}")
         suffix = f" | {', '.join(extras)}" if extras else ""
         return (
             f"RTT Alert: {t['match_key']} | "
@@ -86,16 +89,22 @@ def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings
             extras.append(f"{len(new_listings)} new")
         if viagogo_drops:
             extras.append("Argentina drop")
+        if supply_dumps:
+            extras.append(f"{len(supply_dumps)} supply dump{'s' if len(supply_dumps) > 1 else ''}")
         suffix = f" | {', '.join(extras)}" if extras else ""
         return (
             f"RTT Alert: {len(triggered)} new opportunities | "
             f"Best: {max(t['profit_margin'] for t in triggered):.0%} profit{suffix}"
         )
-    if new_listings and not removed and not viagogo_drops:
+    if new_listings and not removed and not viagogo_drops and not supply_dumps:
         return f"RTT Supply: {len(new_listings)} new listing(s) on marketplace"
-    if viagogo_drops and not triggered and not removed and not new_listings:
+    if viagogo_drops and not triggered and not removed and not new_listings and not supply_dumps:
         d = viagogo_drops[0]
         return f"Argentina price drop: ${d['current_price']:,.0f} (threshold ${d['threshold']:,.0f})"
+    if supply_dumps and not triggered and not removed and not new_listings and not viagogo_drops:
+        d = supply_dumps[0]
+        delta = d.get("inventory_delta", 0)
+        return f"FIFA supply dump: {d['match_key']} +{delta:,} tickets released"
     parts = []
     if removed:
         parts.append(f"{len(removed)} removed")
@@ -103,11 +112,29 @@ def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings
         parts.append(f"{len(new_listings)} new")
     if viagogo_drops:
         parts.append("Argentina drop")
+    if supply_dumps:
+        parts.append(f"{len(supply_dumps)} supply dump{'s' if len(supply_dumps) > 1 else ''}")
     return f"RTT Activity: {', '.join(parts)}"
 
 
-def _build_html_body(triggered: list[dict], all_profitable: list[dict], removed: list[dict] = [], new_listings: list[dict] = [], viagogo_drops: list[dict] = []) -> str:
+def _build_html_body(triggered: list[dict], all_profitable: list[dict], removed: list[dict] = [], new_listings: list[dict] = [], viagogo_drops: list[dict] = [], supply_dumps: list[dict] = []) -> str:
     sections = []
+
+    if supply_dumps:
+        dump_items = "".join(
+            f"<li><b>{d['match_key']}</b> — FIFA released "
+            f"+{d.get('inventory_delta', 0):,} tickets "
+            f"({d.get('prev_inventory', 0):,} → {d.get('tickets_available', 0):,}). "
+            f"Consider dropping your resale price.</li>"
+            for d in supply_dumps
+        )
+        sections.append(
+            "<div style='background:#fff3cd;border:1px solid #ffc107;border-radius:6px;"
+            "padding:12px 16px;margin-bottom:16px'>"
+            "<b style='color:#856404'>&#9888;&#65039; FIFA Supply Dump Detected</b>"
+            f"<ul style='margin:8px 0 0 16px;color:#664d03'>{dump_items}</ul>"
+            "</div>"
+        )
 
     if triggered:
         sections.append(
@@ -227,8 +254,8 @@ def _build_html_body(triggered: list[dict], all_profitable: list[dict], removed:
 <body style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
   {body}
   <p style="color:#888; font-size:12px; margin-top:24px;">
-    Profit = (get-in &times; 0.80 &minus; RTT price) &divide; RTT price &nbsp;|&nbsp;
-    Threshold: 5% or +$300 &nbsp;|&nbsp;
+    Profit = (get-in &times; 0.725 &minus; RTT price) &divide; RTT price &nbsp;|&nbsp;
+    Threshold: 15% or +$250 &nbsp;|&nbsp;
     <a href="https://collect.fifa.com/right-to-ticket">FIFA RTT Marketplace</a>
   </p>
 </body>
@@ -246,6 +273,8 @@ def _html_table(rows: str) -> str:
         "<th style='padding:6px'>Profit $</th>"
         "<th style='padding:6px'>Profit %</th>"
         "<th style='padding:6px'>Cat</th>"
+        "<th style='padding:6px'>24h Δ</th>"
+        "<th style='padding:6px'>FIFA Inv.</th>"
         "</tr>"
     )
     return (
@@ -262,6 +291,22 @@ def _render_table_rows(listings: list[dict]) -> str:
         color = "#1e8e3e" if t["profit_margin"] >= 0.20 else "#188038"
         profit_d = t.get("profit_dollars", t["seller_net"] - t["rtt_price"])
         profit_str = f"+${profit_d:,.0f}" if profit_d >= 0 else f"-${abs(profit_d):,.0f}"
+        delta = t.get("price_change_24h")
+        if delta is None:
+            delta_str = "<span style='color:#aaa'>—</span>"
+        elif delta > 0:
+            delta_str = f"<span style='color:#1e8e3e'>&#8593; ${delta:,.0f}</span>"
+        else:
+            delta_str = f"<span style='color:#c0392b'>&#8595; ${abs(delta):,.0f}</span>"
+        inv = t.get("tickets_available")
+        if inv is None:
+            inv_str = "<span style='color:#aaa'>—</span>"
+        elif inv <= 50:
+            inv_str = f"<span style='color:#c0392b;font-weight:bold'>{inv:,}</span>"
+        elif inv <= 200:
+            inv_str = f"<span style='color:#e67e22'>{inv:,}</span>"
+        else:
+            inv_str = f"<span style='color:#aaa'>{inv:,}</span>"
         rows.append(
             f"<tr style='border-bottom:1px solid #e0e0e0'>"
             f"<td style='padding:6px'>{t['match_key']}</td>"
@@ -272,12 +317,14 @@ def _render_table_rows(listings: list[dict]) -> str:
             f"<td style='padding:6px;text-align:right;color:{color};font-weight:bold'>"
             f"{t['profit_margin']:.1%}</td>"
             f"<td style='padding:6px;text-align:center'>{t.get('category','?')}</td>"
+            f"<td style='padding:6px;text-align:right'>{delta_str}</td>"
+            f"<td style='padding:6px;text-align:right'>{inv_str}</td>"
             f"</tr>"
         )
     return "".join(rows)
 
 
-def _build_text_body(triggered: list[dict], all_profitable: list[dict], removed: list[dict] = [], new_listings: list[dict] = [], viagogo_drops: list[dict] = []) -> str:
+def _build_text_body(triggered: list[dict], all_profitable: list[dict], removed: list[dict] = [], new_listings: list[dict] = [], viagogo_drops: list[dict] = [], supply_dumps: list[dict] = []) -> str:
     lines = []
 
     if triggered:
@@ -313,6 +360,17 @@ def _build_text_body(triggered: list[dict], all_profitable: list[dict], removed:
             lines.append(f"  Threshold: ${d['threshold']:,.0f}")
             lines.append(f"  Link: {d['url']}")
 
-    lines.append("\nFormula: profit = (get-in * 0.80 - RTT price) / RTT price")
+    if supply_dumps:
+        lines.append("\n=== FIFA SUPPLY DUMP WARNING ===\n")
+        for d in supply_dumps:
+            delta = d.get("inventory_delta", 0)
+            prev = d.get("prev_inventory", 0)
+            curr = d.get("tickets_available", 0)
+            lines.append(
+                f"  {d['match_key']}: +{delta:,} tickets released ({prev:,} → {curr:,})"
+                " — consider dropping your resale price"
+            )
+
+    lines.append("\nFormula: profit = (get-in * 0.725 - RTT price) / RTT price")
     lines.append("FIFA RTT: https://collect.fifa.com/right-to-ticket")
     return "\n".join(lines)

@@ -8,12 +8,12 @@ import json
 import os
 import sys
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.path.insert(0, ".")
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
-from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams, find_td_match
+from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams, find_td_match, find_td_inventory
 from scraper.standings import fetch_standings, is_deadwood_match, get_group_rankings
 from scraper.bbc_bracket import scrape_bbc_bracket, _norm as _bbc_norm
 
@@ -46,9 +46,9 @@ def _resolve_group_code(code: str, rankings: dict) -> Optional[str]:
 
 CAT1_MULTIPLIER = 1.20
 BUYER_FEE = 0.00
-SELLER_FEE = 0.20
-MARGIN_THRESHOLD = 0.05
-DOLLAR_THRESHOLD = 300
+SELLER_FEE = 0.275
+MARGIN_THRESHOLD = 0.15
+DOLLAR_THRESHOLD = 250
 
 DASHBOARD_PATH = os.path.join(os.path.dirname(__file__), "dashboard.html")
 
@@ -194,6 +194,12 @@ async def build_rows() -> list[dict]:
     statuses = fetch_standings()
     rankings = get_group_rankings(statuses)
 
+    state = {}
+    state_path = os.path.join(os.path.dirname(__file__), "state.json")
+    if os.path.exists(state_path):
+        with open(state_path) as _f:
+            state = json.load(_f)
+
     bbc_pairs = await scrape_bbc_bracket()
     bbc_proj = apply_bbc_projections(td, bbc_pairs, rankings)
 
@@ -292,6 +298,13 @@ async def build_rows() -> list[dict]:
 
         fees_dollars = round(used - net, 2)  # total dollar impact of all fees
 
+        inv_count, _inv_status = find_td_inventory(
+            v["home_team"], v["away_team"], td,
+            venue=v.get("venue"), date_str=v.get("match_date"),
+        )
+        composite_key = f"{v['match_key']}||cat{cat}"
+        price_change_24h = state.get(composite_key, {}).get("price_change_24h")
+
         rows.append({
             "match": match_label,
             "subtitle": subtitle,
@@ -311,6 +324,8 @@ async def build_rows() -> list[dict]:
             "dead": dead,
             "tbd": tbd,
             "alert": margin >= MARGIN_THRESHOLD or profit >= DOLLAR_THRESHOLD,
+            "tickets_available": inv_count,
+            "price_change_24h": price_change_24h,
         })
 
     rows.sort(key=lambda x: -x["margin"])
@@ -597,12 +612,12 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
         <th data-col="match">Match</th>
         <th data-col="cat">Cat</th>
         <th data-col="rtt" class="num">RTT price</th>
-        <th data-col="breakeven" class="num">Breakeven</th>
+        <th data-col="breakeven" class="num">Breakeven Bid Price</th>
         <th data-col="profit" class="num">Profit $</th>
         <th data-col="margin" class="num">Margin</th>
         <th data-col="used" class="num">Cat-adj. get-in</th>
-        <th data-col="fees" class="num">Fees $</th>
-        <th data-col="td_floor" class="num">Floor price</th>
+        <th data-col="tickets_available" class="num">FIFA Inv.</th>
+        <th data-col="price_change_24h" class="num">24h Δ</th>
       </tr>
     </thead>
     <tbody id="tableBody"></tbody>
@@ -614,7 +629,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
 </div>
 
 <div class="formula-note">
-  <span><b>Formula:</b> seller_net = get_in × 0.80 &nbsp;·&nbsp; profit = seller_net − RTT price</span>
+  <span><b>Formula:</b> seller_net = get_in × 0.725 &nbsp;·&nbsp; profit = seller_net − RTT price</span>
   <span><b>Cat multipliers:</b> Cat1 × 1.20, Cat2 × 1.00, Cat3 × 0.80</span>
   <span><b>Alert:</b> margin ≥ {int(MARGIN_THRESHOLD*100)}% OR profit ≥ ${DOLLAR_THRESHOLD}</span>
 </div>
@@ -680,6 +695,10 @@ function renderTable() {{
     const profitStr = (r.profit >= 0 ? "+$" : "−$") + fmt(Math.abs(r.profit));
     const rowClass = r.alert ? "alert-row" : r.dead ? "dead-row" : "";
     const catClass = `cat-${{r.cat}}`;
+    const invStr = r.tickets_available != null ? (r.tickets_available <= 50 ? fmt(r.tickets_available) + " !" : fmt(r.tickets_available)) : "—";
+    const invClass = r.tickets_available != null && r.tickets_available <= 50 ? "profit-neg" : (r.tickets_available != null && r.tickets_available <= 200 ? "" : "very-dim");
+    const rttDelta = r.price_change_24h != null ? (r.price_change_24h > 0 ? "↑ $" + fmt(r.price_change_24h) : "↓ $" + fmt(Math.abs(r.price_change_24h))) : "—";
+    const deltaClass = r.price_change_24h != null ? (r.price_change_24h > 0 ? "profit-pos" : "profit-neg") : "very-dim";
 
     const sub = r.subtitle || fmtDate(r.date);
 
@@ -694,8 +713,8 @@ function renderTable() {{
       <td class="num ${{profitClass}}">${{profitStr}}</td>
       <td class="num ${{pctClass}}">${{pct}}</td>
       <td class="num dim">$${{fmt(r.used)}}</td>
-      <td class="num very-dim">$${{fmt(r.fees)}}</td>
-      <td class="num very-dim">$${{fmt(r.td_floor)}}</td>
+      <td class="num $${{invClass}}">$${{invStr}}</td>
+      <td class="num $${{deltaClass}}">$${{rttDelta}}</td>
     </tr>`;
   }});
 }}

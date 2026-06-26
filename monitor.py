@@ -15,11 +15,12 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import datetime
 import re
 
 from scraper.fifa_rtt import scrape_fifa_rtt, get_min_prices_by_match
 from scraper.viagogo import scrape_viagogo_min_price
-from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams
+from scraper.ticketdata import scrape_all_matches, find_get_in_price, find_td_teams, find_td_inventory
 from scraper.standings import fetch_standings, is_deadwood_match, get_group_rankings
 from scraper.bbc_bracket import scrape_bbc_bracket
 from alerts.email import send_alert
@@ -61,7 +62,7 @@ def _was_profitable(entry: dict, margin_threshold: float, dollar_threshold: floa
     gip = entry.get("get_in_price")
     rtt = entry.get("min_price", float("inf"))
     if gip:
-        return (gip * 0.80 - rtt) >= dollar_threshold
+        return (gip * 0.725 - rtt) >= dollar_threshold
     return False
 
 
@@ -288,6 +289,10 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
 
     dollar_threshold = cfg.get("profit_dollar_threshold", 300)
 
+    supply_dumps: list[dict] = []
+    now_ts = datetime.datetime.utcnow().isoformat()
+    cutoff_ts = (datetime.datetime.utcnow() - datetime.timedelta(hours=24)).isoformat()
+
     for composite_key, listing in filtered_mins.items():
         is_brand_new = composite_key not in prev_keys
         rtt_price = listing["min_price"]
@@ -306,6 +311,9 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                     "get_in_price": None,
                     "profit_margin": None,
                 })
+            _prev_hist = state.get(composite_key, {}).get("price_history", [])
+            _history = [e for e in _prev_hist if e["ts"] >= cutoff_ts]
+            _history.append({"ts": now_ts, "rtt": rtt_price})
             state[composite_key] = {
                 "min_price": rtt_price,
                 "get_in_price": None,
@@ -313,12 +321,44 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 "match_key": listing["match_key"],
                 "match_label": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
                 "category": listing["category"],
+                "price_history": _history,
             }
             continue
 
         seller_net, margin = compute_profit(rtt_price, get_in, cfg)
         profit_dollars = seller_net - rtt_price
         deadwood = is_deadwood_match(listing["home_team"], listing["away_team"], statuses)
+
+        # Inventory tracking + supply dump detection
+        tickets_available, tickets_status = find_td_inventory(
+            listing["home_team"], listing["away_team"], td_matches,
+            venue=listing.get("venue"), date_str=listing.get("match_date"),
+        )
+        prev_state = state.get(composite_key, {})
+        prev_inventory = prev_state.get("tickets_available")
+        inventory_delta = (
+            (tickets_available - prev_inventory)
+            if (prev_inventory is not None and tickets_available is not None)
+            else None
+        )
+        supply_dump = (
+            inventory_delta is not None and (
+                inventory_delta >= 500
+                or (prev_inventory and inventory_delta / prev_inventory >= 0.5)
+            )
+        )
+
+        # 24h RTT price history
+        prev_history = prev_state.get("price_history", [])
+        history = [e for e in prev_history if e["ts"] >= cutoff_ts]
+        history.append({"ts": now_ts, "rtt": rtt_price, "get_in": get_in})
+        one_hour_ago = (datetime.datetime.utcnow() - datetime.timedelta(hours=1)).isoformat()
+        oldest = history[0] if history else None
+        price_change_24h = (
+            (get_in - oldest["get_in"])
+            if (oldest and oldest["ts"] < one_hour_ago and oldest.get("get_in") is not None)
+            else None
+        )
 
         result = {
             "match_key": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
@@ -334,6 +374,10 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "profit_margin": margin,
             "profit_dollars": profit_dollars,
             "deadwood": deadwood,
+            "price_change_24h": price_change_24h,
+            "tickets_available": tickets_available,
+            "supply_dump": supply_dump,
+            "inventory_delta": inventory_delta,
         }
 
         if margin >= threshold or profit_dollars >= dollar_threshold:
@@ -368,6 +412,18 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 f"RTT ${rtt_price:,.0f} | Margin {margin:.1%}"
             )
 
+        if supply_dump:
+            supply_dumps.append({
+                "match_key": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
+                "tickets_available": tickets_available,
+                "prev_inventory": prev_inventory,
+                "inventory_delta": inventory_delta,
+            })
+            logger.warning(
+                f"SUPPLY DUMP: {listing['match_key']} — FIFA inventory +{inventory_delta:,} "
+                f"({prev_inventory:,} → {tickets_available:,})"
+            )
+
         # Update state — raw match_key for stability, match_label for display
         state[composite_key] = {
             "min_price": rtt_price,
@@ -376,6 +432,9 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "match_key": listing["match_key"],
             "match_label": _build_match_label(listing, td_matches, rankings, statuses or {}, bbc_proj),
             "category": listing["category"],
+            "price_history": history,
+            "price_change_24h": price_change_24h,
+            "tickets_available": tickets_available,
         }
 
 
@@ -391,9 +450,9 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         logger.info("DRY RUN — no email sent")
         _print_summary(all_profitable, triggered)
         from alerts.email import _build_subject, _build_text_body
-        print(f"\nEMAIL SUBJECT: {_build_subject(triggered, removed_listings, [], viagogo_drops)}\n")
-        print(_build_text_body(triggered, all_profitable, removed_listings, [], viagogo_drops))
-    elif triggered or removed_listings or viagogo_drops or force_alert:
+        print(f"\nEMAIL SUBJECT: {_build_subject(triggered, removed_listings, [], viagogo_drops, supply_dumps)}\n")
+        print(_build_text_body(triggered, all_profitable, removed_listings, [], viagogo_drops, supply_dumps))
+    elif triggered or removed_listings or viagogo_drops or supply_dumps or force_alert:
         sendgrid_key = _get_env("SENDGRID_API_KEY")
         from_email = _get_env("ALERT_FROM_EMAIL")
         to_email = cfg.get("alert_email") or _get_env("ALERT_EMAIL")
@@ -407,6 +466,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 all_profitable_listings=all_profitable,
                 removed_listings=removed_listings,
                 viagogo_drops=viagogo_drops,
+                supply_dumps=supply_dumps,
             )
         except Exception as e:
             logger.error(f"Email send failed (state still saved): {e}")
