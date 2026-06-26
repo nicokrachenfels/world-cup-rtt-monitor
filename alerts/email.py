@@ -295,9 +295,9 @@ def _render_table_rows(listings: list[dict]) -> str:
         if delta is None:
             delta_str = "<span style='color:#aaa'>—</span>"
         elif delta > 0:
-            delta_str = f"<span style='color:#1e8e3e'>&#8593; {delta:.1f}%</span>"
+            delta_str = f"&#9650; {delta:.1f}%"
         else:
-            delta_str = f"<span style='color:#c0392b'>&#8595; {abs(delta):.1f}%</span>"
+            delta_str = f"&#9660; {abs(delta):.1f}%"
         inv = t.get("tickets_available")
         if inv is None:
             inv_str = "<span style='color:#aaa'>—</span>"
