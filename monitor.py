@@ -52,6 +52,19 @@ def save_state(state: dict) -> None:
         json.dump(state, f, indent=2)
 
 
+def _was_profitable(entry: dict, margin_threshold: float, dollar_threshold: float) -> bool:
+    margin = entry.get("margin")
+    if margin is None:
+        return False
+    if margin >= margin_threshold:
+        return True
+    gip = entry.get("get_in_price")
+    rtt = entry.get("min_price", float("inf"))
+    if gip:
+        return (gip * 0.80 - rtt) >= dollar_threshold
+    return False
+
+
 def compute_profit(rtt_price: float, get_in_price: float, cfg: dict) -> tuple[float, float]:
     """
     Returns (seller_net, profit_margin).
@@ -235,7 +248,23 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     # ── 6. Detect removed/sold listings ──────────────────────────────────
     prev_keys = {k for k in state if not k.startswith("_")}
     current_rtt_keys = set(filtered_mins.keys())
-    removed_keys = prev_keys - current_rtt_keys
+
+    # Sanity guard: if the scraper returned near-empty results while state has many
+    # entries, assume a partial scrape and skip removed/new detection to prevent
+    # oscillation spam (all listings cycle "removed → new → removed" every run).
+    scrape_suspect = len(prev_keys) > 5 and len(current_rtt_keys) < 3
+    if scrape_suspect:
+        logger.warning(
+            f"Scrape returned only {len(current_rtt_keys)} listings vs {len(prev_keys)} in state "
+            "— skipping removed/new detection (likely partial scrape result)"
+        )
+
+    removed_keys = (prev_keys - current_rtt_keys) if not scrape_suspect else set()
+    _margin_thresh = cfg["profit_threshold"]
+    _dollar_thresh = cfg.get("profit_dollar_threshold", 300)
+
+    # Only report removals for listings that were previously profitable —
+    # non-profitable listings appear/disappear constantly and are just noise.
     removed_listings = [
         {
             "match_key": state[k].get("match_label", state[k]["match_key"]),
@@ -243,10 +272,13 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "last_price": state[k]["min_price"],
         }
         for k in removed_keys
-        if state[k].get("match_key")
+        if state[k].get("match_key") and _was_profitable(state[k], _margin_thresh, _dollar_thresh)
     ]
+    silent_removed = len(removed_keys) - len(removed_listings)
     if removed_listings:
-        logger.info(f"Removed from marketplace: {[r['match_key'] for r in removed_listings]}")
+        logger.info(f"Profitable listings removed: {[r['match_key'] for r in removed_listings]}")
+    if silent_removed:
+        logger.info(f"Non-profitable listings removed (no email): {silent_removed}")
 
     # ── 7. Evaluate profitability ─────────────────────────────────────────
     threshold = cfg["profit_threshold"]
@@ -359,9 +391,9 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         logger.info("DRY RUN — no email sent")
         _print_summary(all_profitable, triggered)
         from alerts.email import _build_subject, _build_text_body
-        print(f"\nEMAIL SUBJECT: {_build_subject(all_profitable, removed_listings, new_listings, viagogo_drops)}\n")
-        print(_build_text_body(all_profitable, all_profitable, removed_listings, new_listings, viagogo_drops))
-    elif triggered or removed_listings or new_listings or viagogo_drops or force_alert:
+        print(f"\nEMAIL SUBJECT: {_build_subject(triggered, removed_listings, [], viagogo_drops)}\n")
+        print(_build_text_body(triggered, all_profitable, removed_listings, [], viagogo_drops))
+    elif triggered or removed_listings or viagogo_drops or force_alert:
         sendgrid_key = _get_env("SENDGRID_API_KEY")
         from_email = _get_env("ALERT_FROM_EMAIL")
         to_email = cfg.get("alert_email") or _get_env("ALERT_EMAIL")
@@ -374,7 +406,6 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
                 triggered_listings=triggered,
                 all_profitable_listings=all_profitable,
                 removed_listings=removed_listings,
-                new_listings=new_listings,
                 viagogo_drops=viagogo_drops,
             )
         except Exception as e:
