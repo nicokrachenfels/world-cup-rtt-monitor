@@ -273,7 +273,7 @@ def _html_table(rows: str) -> str:
         "<th style='padding:6px'>Profit $</th>"
         "<th style='padding:6px'>Profit %</th>"
         "<th style='padding:6px'>Cat</th>"
-        "<th style='padding:6px'>24h Δ</th>"
+        "<th style='padding:6px'>3h get-in Δ</th>"
         "<th style='padding:6px'>FIFA Inv.</th>"
         "</tr>"
     )

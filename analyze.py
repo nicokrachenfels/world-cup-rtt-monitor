@@ -616,7 +616,7 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
         <th data-col="profit" class="num">Profit $</th>
         <th data-col="margin" class="num">Margin</th>
         <th data-col="used" class="num">Cat-adj. get-in</th>
-        <th data-col="price_change_24h" class="num">24h Δ</th>
+        <th data-col="price_change_24h" class="num">3h get-in Δ</th>
       </tr>
     </thead>
     <tbody id="tableBody"></tbody>

@@ -291,7 +291,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
 
     supply_dumps: list[dict] = []
     now_ts = datetime.datetime.utcnow().isoformat()
-    cutoff_ts = (datetime.datetime.utcnow() - datetime.timedelta(hours=24)).isoformat()
+    cutoff_ts = (datetime.datetime.utcnow() - datetime.timedelta(hours=3)).isoformat()
 
     for composite_key, listing in filtered_mins.items():
         is_brand_new = composite_key not in prev_keys
@@ -352,7 +352,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         prev_history = prev_state.get("price_history", [])
         history = [e for e in prev_history if e["ts"] >= cutoff_ts]
         history.append({"ts": now_ts, "rtt": rtt_price, "get_in": get_in})
-        one_hour_ago = (datetime.datetime.utcnow() - datetime.timedelta(hours=1)).isoformat()
+        one_hour_ago = (datetime.datetime.utcnow() - datetime.timedelta(minutes=30)).isoformat()
         oldest = history[0] if history else None
         price_change_24h = (
             (get_in - oldest["get_in"])
