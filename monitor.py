@@ -291,7 +291,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
 
     supply_dumps: list[dict] = []
     now_ts = datetime.datetime.utcnow().isoformat()
-    cutoff_ts = (datetime.datetime.utcnow() - datetime.timedelta(hours=3)).isoformat()
+    cutoff_ts = (datetime.datetime.utcnow() - datetime.timedelta(hours=4)).isoformat()
 
     for composite_key, listing in filtered_mins.items():
         is_brand_new = composite_key not in prev_keys
