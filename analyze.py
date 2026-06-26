@@ -696,7 +696,7 @@ function renderTable() {{
     const profitStr = (r.profit >= 0 ? "+$" : "−$") + fmt(Math.abs(r.profit));
     const rowClass = r.alert ? "alert-row" : r.dead ? "dead-row" : "";
     const catClass = `cat-${{r.cat}}`;
-    const rttDelta = r.price_change_24h != null ? (r.price_change_24h > 0 ? "↑ $" + fmt(r.price_change_24h) : "↓ $" + fmt(Math.abs(r.price_change_24h))) : "—";
+    const rttDelta = r.price_change_24h != null ? (r.price_change_24h > 0 ? "↑ " + Math.abs(r.price_change_24h).toFixed(1) + "%" : "↓ " + Math.abs(r.price_change_24h).toFixed(1) + "%") : "—";
     const deltaClass = r.price_change_24h != null ? (r.price_change_24h > 0 ? "profit-pos" : "profit-neg") : "very-dim";
     const rttStr = "$" + fmt(r.rtt) + (r.listings_at_min > 1 ? ` <span style="color:#5B7192;font-size:11px">×${{r.listings_at_min}}</span>` : "");
 

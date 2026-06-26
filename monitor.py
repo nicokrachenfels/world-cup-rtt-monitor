@@ -354,9 +354,10 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
         history.append({"ts": now_ts, "rtt": rtt_price, "get_in": get_in})
         one_hour_ago = (datetime.datetime.utcnow() - datetime.timedelta(minutes=30)).isoformat()
         oldest = history[0] if history else None
+        _oldest_get_in = oldest.get("get_in") if oldest else None
         price_change_24h = (
-            (get_in - oldest["get_in"])
-            if (oldest and oldest["ts"] < one_hour_ago and oldest.get("get_in") is not None)
+            round((get_in - _oldest_get_in) / _oldest_get_in * 100, 1)
+            if (oldest and oldest["ts"] < one_hour_ago and _oldest_get_in)
             else None
         )
 
