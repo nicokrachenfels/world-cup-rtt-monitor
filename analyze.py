@@ -616,7 +616,6 @@ def generate_dashboard(rows: list[dict], updated_at: str) -> None:
         <th data-col="profit" class="num">Profit $</th>
         <th data-col="margin" class="num">Margin</th>
         <th data-col="used" class="num">Cat-adj. get-in</th>
-        <th data-col="tickets_available" class="num">FIFA Inv.</th>
         <th data-col="price_change_24h" class="num">24h Δ</th>
       </tr>
     </thead>
@@ -695,8 +694,6 @@ function renderTable() {{
     const profitStr = (r.profit >= 0 ? "+$" : "−$") + fmt(Math.abs(r.profit));
     const rowClass = r.alert ? "alert-row" : r.dead ? "dead-row" : "";
     const catClass = `cat-${{r.cat}}`;
-    const invStr = r.tickets_available != null ? (r.tickets_available <= 50 ? fmt(r.tickets_available) + " !" : fmt(r.tickets_available)) : "—";
-    const invClass = r.tickets_available != null && r.tickets_available <= 50 ? "profit-neg" : (r.tickets_available != null && r.tickets_available <= 200 ? "" : "very-dim");
     const rttDelta = r.price_change_24h != null ? (r.price_change_24h > 0 ? "↑ $" + fmt(r.price_change_24h) : "↓ $" + fmt(Math.abs(r.price_change_24h))) : "—";
     const deltaClass = r.price_change_24h != null ? (r.price_change_24h > 0 ? "profit-pos" : "profit-neg") : "very-dim";
 
@@ -713,8 +710,7 @@ function renderTable() {{
       <td class="num ${{profitClass}}">${{profitStr}}</td>
       <td class="num ${{pctClass}}">${{pct}}</td>
       <td class="num dim">$${{fmt(r.used)}}</td>
-      <td class="num $${{invClass}}">$${{invStr}}</td>
-      <td class="num $${{deltaClass}}">$${{rttDelta}}</td>
+      <td class="num ${{deltaClass}}">${{rttDelta}}</td>
     </tr>`;
   }});
 }}
