@@ -268,7 +268,8 @@ def get_min_prices_by_match(listings: list[dict]) -> dict[str, dict]:
         cat = listing["category"]
         composite_key = f"{key}||cat{cat}"
 
-        if composite_key not in by_match or listing["price"] < by_match[composite_key]["min_price"]:
+        price = listing["price"]
+        if composite_key not in by_match or price < by_match[composite_key]["min_price"]:
             by_match[composite_key] = {
                 "match_key": key,
                 "home_team": listing["home_team"],
@@ -276,9 +277,12 @@ def get_min_prices_by_match(listings: list[dict]) -> dict[str, dict]:
                 "venue": listing["venue"],
                 "match_date": listing["match_date"],
                 "category": cat,
-                "min_price": listing["price"],
+                "min_price": price,
                 "currency": listing["currency"],
+                "listings_at_min": 1,
             }
+        elif price == by_match[composite_key]["min_price"]:
+            by_match[composite_key]["listings_at_min"] += 1
 
     return by_match
 

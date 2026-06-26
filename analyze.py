@@ -304,6 +304,7 @@ async def build_rows() -> list[dict]:
         )
         composite_key = f"{v['match_key']}||cat{cat}"
         price_change_24h = state.get(composite_key, {}).get("price_change_24h")
+        listings_at_min = v.get("listings_at_min", 1)
 
         rows.append({
             "match": match_label,
@@ -326,6 +327,7 @@ async def build_rows() -> list[dict]:
             "alert": margin >= MARGIN_THRESHOLD or profit >= DOLLAR_THRESHOLD,
             "tickets_available": inv_count,
             "price_change_24h": price_change_24h,
+            "listings_at_min": listings_at_min,
         })
 
     rows.sort(key=lambda x: -x["margin"])
@@ -696,6 +698,7 @@ function renderTable() {{
     const catClass = `cat-${{r.cat}}`;
     const rttDelta = r.price_change_24h != null ? (r.price_change_24h > 0 ? "↑ $" + fmt(r.price_change_24h) : "↓ $" + fmt(Math.abs(r.price_change_24h))) : "—";
     const deltaClass = r.price_change_24h != null ? (r.price_change_24h > 0 ? "profit-pos" : "profit-neg") : "very-dim";
+    const rttStr = "$" + fmt(r.rtt) + (r.listings_at_min > 1 ? ` <span style="color:#5B7192;font-size:11px">×${{r.listings_at_min}}</span>` : "");
 
     const sub = r.subtitle || fmtDate(r.date);
 
@@ -705,7 +708,7 @@ function renderTable() {{
         ${{sub ? `<div class="date-sub">${{sub}}</div>` : ""}}
       </td>
       <td><span class="cat-pill ${{catClass}}">Cat ${{r.cat}}</span></td>
-      <td class="num dim">$${{fmt(r.rtt)}}</td>
+      <td class="num dim">${{rttStr}}</td>
       <td class="num dim">$${{fmt(r.breakeven)}}</td>
       <td class="num ${{profitClass}}">${{profitStr}}</td>
       <td class="num ${{pctClass}}">${{pct}}</td>

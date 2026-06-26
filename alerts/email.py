@@ -307,10 +307,15 @@ def _render_table_rows(listings: list[dict]) -> str:
             inv_str = f"<span style='color:#e67e22'>{inv:,}</span>"
         else:
             inv_str = f"<span style='color:#aaa'>{inv:,}</span>"
+        count = t.get("listings_at_min", 1)
+        rtt_cell = (
+            f"${t['rtt_price']:,.0f}"
+            + (f" <span style='color:#aaa;font-size:11px'>(×{count})</span>" if count > 1 else "")
+        )
         rows.append(
             f"<tr style='border-bottom:1px solid #e0e0e0'>"
             f"<td style='padding:6px'>{t['match_key']}</td>"
-            f"<td style='padding:6px;text-align:right'>${t['rtt_price']:,.0f}</td>"
+            f"<td style='padding:6px;text-align:right'>{rtt_cell}</td>"
             f"<td style='padding:6px;text-align:right'>${t['get_in_price']:,.0f}</td>"
             f"<td style='padding:6px;text-align:right'>${t['seller_net']:,.0f}</td>"
             f"<td style='padding:6px;text-align:right;color:{color};font-weight:bold'>{profit_str}</td>"

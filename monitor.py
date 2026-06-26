@@ -378,6 +378,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "tickets_available": tickets_available,
             "supply_dump": supply_dump,
             "inventory_delta": inventory_delta,
+            "listings_at_min": listing.get("listings_at_min", 1),
         }
 
         if margin >= threshold or profit_dollars >= dollar_threshold:
@@ -435,6 +436,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             "price_history": history,
             "price_change_24h": price_change_24h,
             "tickets_available": tickets_available,
+            "listings_at_min": listing.get("listings_at_min", 1),
         }
 
 
