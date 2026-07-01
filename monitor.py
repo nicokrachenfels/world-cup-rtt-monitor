@@ -342,10 +342,7 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
             else None
         )
         supply_dump = (
-            inventory_delta is not None and (
-                inventory_delta >= 500
-                or (prev_inventory and inventory_delta / prev_inventory >= 0.5)
-            )
+            inventory_delta is not None and inventory_delta >= 500
         )
 
         # 24h RTT price history
