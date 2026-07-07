@@ -32,7 +32,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Install Playwright Chromium
-        run: playwright install chromium --with-deps
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* /etc/apt/sources.list.d/*azure*
+          playwright install chromium --with-deps
 
       - name: Restore monitor state
         uses: actions/cache@v4

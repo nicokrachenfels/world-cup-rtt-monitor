@@ -213,35 +213,35 @@ async def run(dry_run: bool = False, force_alert: bool = False, test_email: bool
     viagogo_drops: list[dict] = []
 
     if viagogo_url:
-        logger.info("Checking Viagogo listing for Match 95 (Argentina)...")
+        logger.info("Checking Viagogo listing for Match 100...")
         vg_price = await scrape_viagogo_min_price(viagogo_url)
         if vg_price is not None:
-            vg_state = state.get("_viagogo_m95", {})
+            vg_state = state.get("_viagogo_m100", {})
             last_alert = vg_state.get("last_alert_price")
             is_new_low = last_alert is None or vg_price < last_alert
 
             if vg_price < vg_threshold and is_new_low:
                 viagogo_drops.append({
-                    "match_name": "W86 vs W88 – Match 95 (Jul 7, Atlanta)",
+                    "match_name": "Match 100 (QF – TBD)",
                     "current_price": vg_price,
                     "previous_price": last_alert,
                     "threshold": vg_threshold,
                     "url": viagogo_url,
                 })
-                state["_viagogo_m95"] = {
+                state["_viagogo_m100"] = {
                     **vg_state,
                     "last_alert_price": vg_price,
                     "min_price": min(vg_state.get("min_price", vg_price), vg_price),
                 }
                 logger.info(
-                    f"ARGENTINA ALERT: ${vg_price:,.0f} < threshold ${vg_threshold:,.0f}"
+                    f"M100 ALERT: ${vg_price:,.0f} < threshold ${vg_threshold:,.0f}"
                     + (f" (prev alert ${last_alert:,.0f})" if last_alert else " (first alert)")
                 )
             else:
                 prev_min = vg_state.get("min_price", vg_price)
-                state["_viagogo_m95"] = {**vg_state, "min_price": min(prev_min, vg_price)}
+                state["_viagogo_m100"] = {**vg_state, "min_price": min(prev_min, vg_price)}
                 logger.info(
-                    f"Viagogo M95: ${vg_price:,.0f} "
+                    f"Viagogo M100: ${vg_price:,.0f} "
                     + (f"(above threshold ${vg_threshold:,.0f})" if vg_price >= vg_threshold
                        else f"(no new low — last alert ${last_alert:,.0f})")
                 )

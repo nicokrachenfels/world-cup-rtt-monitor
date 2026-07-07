@@ -72,7 +72,7 @@ def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings
         if new_listings:
             extras.append(f"{len(new_listings)} new")
         if viagogo_drops:
-            extras.append("Argentina drop")
+            extras.append("M100 drop")
         if supply_dumps:
             extras.append(f"{len(supply_dumps)} supply dump{'s' if len(supply_dumps) > 1 else ''}")
         suffix = f" | {', '.join(extras)}" if extras else ""
@@ -88,7 +88,7 @@ def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings
         if new_listings:
             extras.append(f"{len(new_listings)} new")
         if viagogo_drops:
-            extras.append("Argentina drop")
+            extras.append("M100 drop")
         if supply_dumps:
             extras.append(f"{len(supply_dumps)} supply dump{'s' if len(supply_dumps) > 1 else ''}")
         suffix = f" | {', '.join(extras)}" if extras else ""
@@ -100,7 +100,7 @@ def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings
         return f"RTT Supply: {len(new_listings)} new listing(s) on marketplace"
     if viagogo_drops and not triggered and not removed and not new_listings and not supply_dumps:
         d = viagogo_drops[0]
-        return f"Argentina price drop: ${d['current_price']:,.0f} (threshold ${d['threshold']:,.0f})"
+        return f"M100 price drop: ${d['current_price']:,.0f} (threshold ${d['threshold']:,.0f})"
     if supply_dumps and not triggered and not removed and not new_listings and not viagogo_drops:
         d = supply_dumps[0]
         delta = d.get("inventory_delta", 0)
@@ -111,7 +111,7 @@ def _build_subject(triggered: list[dict], removed: list[dict] = [], new_listings
     if new_listings:
         parts.append(f"{len(new_listings)} new")
     if viagogo_drops:
-        parts.append("Argentina drop")
+        parts.append("M100 drop")
     if supply_dumps:
         parts.append(f"{len(supply_dumps)} supply dump{'s' if len(supply_dumps) > 1 else ''}")
     return f"RTT Activity: {', '.join(parts)}"
@@ -241,10 +241,9 @@ def _build_html_body(triggered: list[dict], all_profitable: list[dict], removed:
             "</table>"
         )
         sections.append(
-            "<h2 style='color:#e67e22;margin:24px 0 4px'>Argentina Price Drop</h2>"
+            "<h2 style='color:#e67e22;margin:24px 0 4px'>Match 100 Price Drop</h2>"
             "<p style='color:#888;font-size:12px;margin-bottom:8px'>"
-            "Match 95 &nbsp;&middot;&nbsp; Jul 7 &nbsp;&middot;&nbsp; "
-            "Mercedes-Benz Stadium, Atlanta</p>"
+            "Match 100 (QF &ndash; TBD)</p>"
             + drop_table
         )
 
