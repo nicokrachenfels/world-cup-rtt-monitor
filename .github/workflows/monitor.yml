@@ -1,8 +1,6 @@
 name: RTT Arbitrage Monitor
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:  # Allow manual trigger for testing
 
 jobs:
